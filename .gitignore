@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+LOKPA_original_full.zip
+original_api/
+original_event_scan_api/
+evidence/
+*.log
