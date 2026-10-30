@@ -1,0 +1,21 @@
+MIT License
+
+Copyright (c) 2026 LOKPA public-runner wrapper contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of the original wrapper files in this repository (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+SCOPE LIMITATION: This license applies only to the original wrapper files in
+this repository. It does not grant any license to LOKPA Original, its
+executables, DLLs, database, ephemerides, third-party libraries, or content
+downloaded or checked out at runtime. Their provenance and licensing must be
+assessed independently.
