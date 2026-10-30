@@ -1,0 +1,49 @@
+name: LOKPA Original — private issue runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number in private zinevichroman-cpu/lokpa-original-test"
+        required: true
+        type: string
+      force_rerun:
+        description: "Allow rerunning an issue that already has a completed result"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  run-original:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test dispatcher
+        run: python -m unittest discover -s tests -v
+      - name: Checkout private LOKPA source for this run only
+        uses: actions/checkout@v4
+        with:
+          repository: zinevichroman-cpu/lokpa-original-test
+          ref: main
+          token: ${{ secrets.LOKPA_PRIVATE_REPO_TOKEN }}
+          path: private-source
+          persist-credentials: false
+      - name: Install Original runner dependency
+        run: python -m pip install --disable-pip-version-check --quiet gdown==5.2.0
+      - name: Execute selected private issue
+        env:
+          LOKPA_PRIVATE_REPO: zinevichroman-cpu/lokpa-original-test
+          LOKPA_ISSUE_NUMBER: ${{ inputs.issue_number }}
+          LOKPA_FORCE_RERUN: ${{ inputs.force_rerun }}
+          LOKPA_PRIVATE_REPO_TOKEN: ${{ secrets.LOKPA_PRIVATE_REPO_TOKEN }}
+          PRIVATE_SOURCE_PATH: private-source
+        run: python dispatch_runner.py
