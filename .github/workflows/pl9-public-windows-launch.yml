@@ -587,20 +587,32 @@ jobs:
                 }
               }
             }
-            # Close only the known blocking printout dialog; do not confirm or print it.
+            # The printout dialog is a descendant window of the Qt main window.
             $printout = $null
+            $dialogCondition = New-Object System.Windows.Automation.PropertyCondition(
+              [System.Windows.Automation.AutomationElement]::NameProperty, 'User defined printout'
+            )
             foreach ($top in $topWindows) {
-              if ($top.Current.ProcessId -eq $pl9Process.Id -and $top.Current.Name -eq 'User defined printout') { $printout = $top; break }
+              if ($top.Current.ProcessId -eq $pl9Process.Id) {
+                $printout = $top.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dialogCondition)
+                if ($null -ne $printout) { break }
+              }
             }
             if ($null -ne $printout) {
               try {
+                $printout.SetFocus()
                 $windowPattern = $printout.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
                 $windowPattern.Close()
                 Start-Sleep -Seconds 2
                 Write-Host 'PL9_PRINT_DIALOG_CLOSED=true'
               } catch {
-                Write-Host "PL9_PRINT_DIALOG_CLOSE_ERROR=$($_.Exception.Message)"
+                Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+                [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+                Start-Sleep -Seconds 2
+                Write-Host "PL9_PRINT_DIALOG_CLOSE_FALLBACK=$($_.Exception.Message)"
               }
+            } else {
+              Write-Host 'PL9_PRINT_DIALOG_NOT_FOUND_IN_UIA_TREE=true'
             }
             $desktopRoot = [System.Windows.Automation.AutomationElement]::RootElement
             $topWindows = $desktopRoot.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
