@@ -159,8 +159,8 @@ jobs:
               var inputs=new Pl9Input[] { KeyInput(0x0D,0), KeyInput(0x0D,2) };
               return SendInput((uint)inputs.Length,inputs,Marshal.SizeOf(typeof(Pl9Input)));
             }
-            public static uint SendCtrlO() {
-              var inputs=new Pl9Input[] { KeyInput(0x11,0), KeyInput(0x4F,0), KeyInput(0x4F,2), KeyInput(0x11,2) };
+            public static uint SendKey(ushort key) {
+              var inputs=new Pl9Input[] { KeyInput(key,0), KeyInput(key,2) };
               return SendInput((uint)inputs.Length,inputs,Marshal.SizeOf(typeof(Pl9Input)));
             }
             public static uint SendTestName() {
@@ -334,10 +334,15 @@ jobs:
               $focusMatch=($foregroundHandle -eq $handle)
               Write-Host "PL9_FOCUS_REQUEST=$focusRequest FOREGROUND_MATCH=$focusMatch"
               if($focusMatch){
-                $opened=[Pl9WindowsProbe]::SendCtrlO()
-                Write-Host "PL9_SENDINPUT_CTRL_O_COUNT=$opened"
-                Start-Sleep -Seconds 2
-                Write-Host "PL9_FILE_OPEN_DIALOG_PROBE=true"
+                # Official PL7/PL9 menu model: File > New opens the Birth Data form.
+                $fileMenu=[Pl9WindowsProbe]::SendAltF()
+                Start-Sleep -Milliseconds 500
+                $newKey=[Pl9WindowsProbe]::SendKey(0x4E)
+                Start-Sleep -Milliseconds 500
+                $activateNew=[Pl9WindowsProbe]::SendEnter()
+                Write-Host "PL9_FILE_NEW_INPUT_COUNTS altf=$fileMenu n=$newKey enter=$activateNew"
+                Start-Sleep -Seconds 3
+                Write-Host "PL9_BIRTH_DATA_FORM_PROBE=true"
                 $ownedHandles=New-Object 'System.Collections.Generic.List[System.IntPtr]'
                 $ownedInfo=New-Object 'System.Collections.Generic.List[string]'
                 $ownedCb=[Pl9WindowsProbe+WindowEnumerator] {
@@ -395,17 +400,17 @@ jobs:
                 try {
                   $afterRoot=[System.Windows.Automation.AutomationElement]::FromHandle($handle)
                   $afterNodes=$afterRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-                  Write-Host "PL9_AFTER_ALT_F_MAIN_UIA_DESCENDANTS=$($afterNodes.Count)"
+                  Write-Host "PL9_AFTER_FILE_NEW_MAIN_UIA_DESCENDANTS=$($afterNodes.Count)"
                   for($j=0;$j -lt [Math]::Min($afterNodes.Count,30);$j++){
                     $el=$afterNodes.Item($j)
-                    Write-Host "PL9_AFTER_ALT_F_NODE[$j]=TYPE:$($el.Current.ControlType.ProgrammaticName); NAME:$($el.Current.Name); ID:$($el.Current.AutomationId)"
+                    Write-Host "PL9_AFTER_FILE_NEW_NODE[$j]=TYPE:$($el.Current.ControlType.ProgrammaticName); NAME:$($el.Current.Name); ID:$($el.Current.AutomationId)"
                   }
                   for($w=0;$w -lt $ownedHandles.Count;$w++){
                     if($ownedHandles[$w] -eq $handle){continue}
                     $otherRoot=[System.Windows.Automation.AutomationElement]::FromHandle($ownedHandles[$w])
                     if($null -ne $otherRoot){
                       $otherNodes=$otherRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-                      Write-Host "PL9_AFTER_ALT_F_WINDOW[$w]_UIA_DESCENDANTS=$($otherNodes.Count)"
+                      Write-Host "PL9_AFTER_FILE_NEW_WINDOW[$w]_UIA_DESCENDANTS=$($otherNodes.Count)"
                       for($j=0;$j -lt [Math]::Min($otherNodes.Count,15);$j++){
                         $el=$otherNodes.Item($j)
                         Write-Host "PL9_AFTER_ALT_F_WINDOW[$w]_NODE[$j]=TYPE:$($el.Current.ControlType.ProgrammaticName); NAME:$($el.Current.Name); ID:$($el.Current.AutomationId)"
