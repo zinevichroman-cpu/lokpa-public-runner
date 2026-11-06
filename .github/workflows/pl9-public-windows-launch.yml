@@ -118,6 +118,8 @@ jobs:
             public uint type;
             public Pl9InputUnion U;
           }
+          [StructLayout(LayoutKind.Sequential)]
+          public struct Pl9Rect { public int Left; public int Top; public int Right; public int Bottom; }
           public class Pl9WindowsProbe {
             public delegate bool WindowEnumerator(IntPtr hwnd, IntPtr lparam);
             [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hwnd, WindowEnumerator cb, IntPtr p);
@@ -127,6 +129,8 @@ jobs:
             [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr menu);
             [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
             [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll")]
+            public static extern bool GetWindowRect(IntPtr hwnd, out Pl9Rect rect);
             [DllImport("user32.dll", SetLastError=true)]
             public static extern uint SendInput(uint count, [In] Pl9Input[] inputs, int size);
             private static Pl9Input KeyInput(ushort key, uint flags) {
@@ -293,6 +297,43 @@ jobs:
                 [Pl9WindowsProbe]::EnumWindows($ownedCb,[IntPtr]::Zero) | Out-Null
                 Write-Host "PL9_OWNED_VISIBLE_WINDOWS=$($ownedHandles.Count)"
                 $ownedInfo | ForEach-Object { Write-Host "PL9_OWNED_WINDOW: $_" }
+                # Capture the main PL9 window and any Qt popup into a compact JPEG for visual inspection.
+                try {
+                  Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+                  $left=[int]::MaxValue; $top=[int]::MaxValue; $right=[int]::MinValue; $bottom=[int]::MinValue
+                  foreach($wh in $ownedHandles){
+                    $wr=New-Object Pl9Rect
+                    if([Pl9WindowsProbe]::GetWindowRect($wh,[ref]$wr)){
+                      Write-Host "PL9_WINDOW_RECT HWND=0x$($wh.ToInt64().ToString('X')) L=$($wr.Left) T=$($wr.Top) R=$($wr.Right) B=$($wr.Bottom)"
+                      $left=[Math]::Min($left,$wr.Left); $top=[Math]::Min($top,$wr.Top)
+                      $right=[Math]::Max($right,$wr.Right); $bottom=[Math]::Max($bottom,$wr.Bottom)
+                    }
+                  }
+                  if($right -gt $left -and $bottom -gt $top){
+                    $left=[Math]::Max(0,$left-30); $top=[Math]::Max(0,$top-30)
+                    $width=[Math]::Min(1800,$right-$left+60); $height=[Math]::Min(1200,$bottom-$top+60)
+                    $bitmap=[System.Drawing.Bitmap]::new($width,$height)
+                    $graphics=[System.Drawing.Graphics]::FromImage($bitmap)
+                    $stream=[System.IO.MemoryStream]::new()
+                    try {
+                      $graphics.CopyFromScreen($left,$top,0,0,[System.Drawing.Size]::new($width,$height))
+                      $bitmap.Save($stream,[System.Drawing.Imaging.ImageFormat]::Jpeg)
+                      $bytes=$stream.ToArray()
+                      $b64=[Convert]::ToBase64String($bytes)
+                      Write-Host "PL9_SCREENSHOT_BYTES=$($bytes.Length) WIDTH=$width HEIGHT=$height"
+                      for($offset=0,$chunk=0;$offset -lt $b64.Length;$offset+=3000,$chunk++){
+                        $count=[Math]::Min(3000,$b64.Length-$offset)
+                        Write-Host "PL9_SCREENSHOT_B64[$chunk]=$($b64.Substring($offset,$count))"
+                      }
+                    } finally {
+                      $stream.Dispose(); $graphics.Dispose(); $bitmap.Dispose()
+                    }
+                  } else {
+                    Write-Host "PL9_SCREENSHOT_ERROR=No valid window rectangle"
+                  }
+                } catch {
+                  Write-Host "PL9_SCREENSHOT_ERROR=$($_.Exception.Message)"
+                }
                 try {
                   $afterRoot=[System.Windows.Automation.AutomationElement]::FromHandle($handle)
                   $afterNodes=$afterRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
