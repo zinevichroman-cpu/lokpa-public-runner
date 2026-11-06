@@ -420,7 +420,18 @@ class PL9Controller:
                 }
             win.set_focus()
             # PL9 manual confirms Ctrl+O opens the native chart file dialog.
-            win.type_keys("^o", set_foreground=True)
+            # Send a real Windows key chord to the foreground PL9 window;
+            # pywinauto type_keys did not activate the Qt shortcut on the runner.
+            import ctypes
+            user32 = ctypes.windll.user32
+            user32.ShowWindow(win.handle, 9)
+            user32.SetForegroundWindow(win.handle)
+            time.sleep(0.2)
+            user32.keybd_event(0x11, 0, 0, 0)  # Ctrl down
+            time.sleep(0.05)
+            user32.keybd_event(0x4F, 0, 0, 0)  # O down
+            user32.keybd_event(0x4F, 0, 0x0002, 0)  # O up
+            user32.keybd_event(0x11, 0, 0x0002, 0)  # Ctrl up
             dialog = None
             dialogs = []
             deadline = time.time() + 12
