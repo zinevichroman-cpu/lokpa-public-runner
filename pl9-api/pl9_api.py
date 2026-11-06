@@ -419,11 +419,8 @@ class PL9Controller:
                     "calculation_verified": False,
                 }
             win.set_focus()
-            # File menu order begins New, Open. Use explicit menu navigation;
-            # Qt's access-key sequence left a popup instead of opening the dialog.
-            win.type_keys("%f", set_foreground=True)
-            time.sleep(0.25)
-            win.type_keys("{DOWN 2}{ENTER}")
+            # PL9 manual confirms Ctrl+O opens the native chart file dialog.
+            win.type_keys("^o", set_foreground=True)
             dialog = None
             dialogs = []
             deadline = time.time() + 12
@@ -438,6 +435,8 @@ class PL9Controller:
                         candidate_title = candidate.window_text().casefold()
                         if candidate_pid != pid or candidate_class in popup_classes:
                             continue
+                        if "file manager" in candidate_title:
+                            continue
                         if not candidate_class and not candidate_title:
                             continue
                         dialogs.append(candidate)
@@ -446,13 +445,16 @@ class PL9Controller:
                 dialog = next(
                     (w for w in dialogs if any(
                         token in w.window_text().casefold()
-                        for token in ("open", "file manager", "chart", "открыть")
+                        for token in ("open", "chart", "открыть")
                     )),
                     None,
                 )
                 # The Qt file dialog may have the generic title "PL9".
                 if dialog is None and len(dialogs) == 1:
-                    dialog = dialogs[0]
+                    candidate = dialogs[0]
+                    candidate_class = candidate.class_name().casefold()
+                    if candidate_class in {"qt5qwindowicon", "#32770"}:
+                        dialog = candidate
                 if dialog is not None:
                     break
                 time.sleep(0.25)
