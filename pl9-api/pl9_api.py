@@ -566,15 +566,18 @@ class PL9RequestHandler(BaseHTTPRequestHandler):
                 self._send(200, parse_ephemeris_export(self.config.export_dir / "ephemeris.txt"))
                 return
             chart_id = _chart_id_from_path(path)
-            if chart_id and not path.endswith("/open"):
+            if chart_id and path == f"/charts/{chart_id}":
                 chart_file = self.config.charts_dir / f"{chart_id}.xml"
                 if not chart_file.is_file():
                     self._send(404, {"error": "chart_not_found", "chart_id": chart_id})
                     return
+                metadata_path = self.config.export_dir / ".pl9_api" / f"{chart_id}.json"
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
                 self._send(200, {
                     "chart_id": chart_id, "chart_file": str(chart_file),
-                    "xml_bytes": chart_file.stat().st_size, "status": "NATIVE_PL9_XML_PRESENT",
-                    "calculation_verified": False,
+                    "xml_bytes": chart_file.stat().st_size, "status": metadata.get("status", "NATIVE_PL9_XML_PRESENT"),
+                    "calculation_verified": metadata.get("calculation_verified", False),
+                    "last_calculation_utc": metadata.get("last_calculation_utc"),
                 })
                 return
             self._send(404, {"error": "not_found"})
@@ -591,17 +594,45 @@ class PL9RequestHandler(BaseHTTPRequestHandler):
             if path in ("/charts", "/horoscope"):
                 data = self._body()
                 open_requested = data.get("open", True)
-                if not isinstance(open_requested, bool):
-                    raise RequestError("open must be boolean")
-                xml = build_birth_xml(data.get("birth"))
+                calculate_requested = data.get("calculate", False)
+                if not isinstance(open_requested, bool) or not isinstance(calculate_requested, bool):
+                    raise RequestError("open and calculate must be boolean")
+                if calculate_requested and not open_requested:
+                    raise RequestError("calculate=true requires open=true")
+                birth = data.get("birth")
+                xml = build_birth_xml(birth)
+                display_name = _required_text(birth, "name", 120)
                 chart_id = uuid.uuid4().hex
                 self.config.charts_dir.mkdir(parents=True, exist_ok=True)
                 chart_file = self.config.charts_dir / f"{chart_id}.xml"
                 temp_file = chart_file.with_suffix(".xml.tmp")
                 temp_file.write_bytes(xml)
                 temp_file.replace(chart_file)
+                metadata_dir = self.config.export_dir / ".pl9_api"
+                metadata_dir.mkdir(parents=True, exist_ok=True)
+                metadata_path = metadata_dir / f"{chart_id}.json"
+                metadata = {
+                    "chart_id": chart_id, "birth": birth, "status": "NATIVE_PL9_XML_CREATED",
+                    "calculation_verified": False,
+                    "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+                }
+                metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+                if calculate_requested:
+                    operation = self.controller.calculate_chart(chart_file, display_name, birth)
+                    metadata.update({
+                        "status": operation.get("status"),
+                        "calculation_verified": operation.get("calculation_verified") is True,
+                        "last_calculation_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+                    })
+                    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+                    self._send(200 if metadata["calculation_verified"] else 502, {
+                        "chart_id": chart_id, "chart_file": str(chart_file), "xml_bytes": len(xml),
+                        "file_status": "CREATED", "operation": operation,
+                        "calculation_verified": metadata["calculation_verified"],
+                    })
+                    return
                 opened = (
-                    self.controller.open_chart(chart_file, _required_text(data["birth"], "name", 120))
+                    self.controller.open_chart(chart_file, display_name)
                     if open_requested else {"status": "NOT_REQUESTED", "calculation_verified": False}
                 )
                 self._send(201, {
@@ -613,7 +644,37 @@ class PL9RequestHandler(BaseHTTPRequestHandler):
                 result = self.controller.trigger_birth_export()
                 self._send(200 if result.get("status") == "EXPORT_FILE_CHANGED" else 202, result)
                 return
+            if path == "/ui/menu":
+                data = self._body()
+                menu_path = _required_text(data, "menu_path", 240)
+                result = self.controller.select_menu(menu_path)
+                self._send(200 if result.get("status") == "MENU_SELECTION_SENT" else 502, result)
+                return
             chart_id = _chart_id_from_path(path)
+            if chart_id and path.endswith("/calculate"):
+                chart_file = self.config.charts_dir / f"{chart_id}.xml"
+                metadata_path = self.config.export_dir / ".pl9_api" / f"{chart_id}.json"
+                if not chart_file.is_file() or not metadata_path.is_file():
+                    self._send(404, {"error": "chart_or_birth_metadata_not_found", "chart_id": chart_id})
+                    return
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                birth = metadata.get("birth")
+                if not isinstance(birth, dict):
+                    self._send(409, {"error": "birth_metadata_invalid", "chart_id": chart_id})
+                    return
+                display_name = _required_text(birth, "name", 120)
+                operation = self.controller.calculate_chart(chart_file, display_name, birth)
+                metadata.update({
+                    "status": operation.get("status"),
+                    "calculation_verified": operation.get("calculation_verified") is True,
+                    "last_calculation_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+                })
+                metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+                self._send(200 if metadata["calculation_verified"] else 502, {
+                    "chart_id": chart_id, "operation": operation,
+                    "calculation_verified": metadata["calculation_verified"],
+                })
+                return
             if chart_id and path.endswith("/open"):
                 chart_file = self.config.charts_dir / f"{chart_id}.xml"
                 if not chart_file.is_file():
