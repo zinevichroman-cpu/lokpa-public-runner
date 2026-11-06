@@ -166,7 +166,7 @@ paths:
                   type: string
                   example: Reports->Horoscope
       responses:
-        '200': { description: Menu selection command sent to PL9 }
+        '202': { description: Keyboard input sent; selected report content is not yet verified }
         '502': { description: Menu selection failed }
   /exports/birth-data/run:
     post:
