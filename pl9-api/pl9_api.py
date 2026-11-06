@@ -321,25 +321,65 @@ class PL9Controller:
             from pywinauto import Application, Desktop
         except ImportError as exc:
             raise RuntimeError("Install pywinauto: python -m pip install -r requirements.txt") from exc
+
+        desktop = Desktop(backend="win32")
+
+        def find_main():
+            visible = desktop.windows(visible_only=True)
+            matches = []
+            for candidate in visible:
+                try:
+                    title = candidate.window_text().casefold()
+                    if "parashara" in title and "light" in title:
+                        matches.append(candidate)
+                except Exception:
+                    continue
+            if not matches:
+                return None, visible
+            # PL9's main top-level window is titled "Parashara's Light 9.0".
+            matches.sort(key=lambda w: ("parashara's light" not in w.window_text().casefold(),
+                                        len(w.window_text())))
+            return matches[0], visible
+
         app = Application(backend="win32")
+        win, visible = find_main()
+        if win is not None:
+            pid = win.process_id()
+            app.connect(process=pid, timeout=10)
+            win.wait("visible", timeout=30)
+            win.set_focus()
+            return app, win
+
         try:
             app.connect(path=str(self.config.exe), timeout=2)
         except Exception:
             app.start(f'"{self.config.exe}"', work_dir=str(self.config.exe.parent), timeout=30)
-        windows = Desktop(backend="win32").windows(process=app.process, visible_only=True)
-        main_candidates = [w for w in windows if "parashara" in w.window_text().casefold()]
-        if main_candidates:
-            win = main_candidates[0]
-        else:
-            excluded = ("data entry", "file manager", "open", "save")
-            main_candidates = [
-                w for w in windows
-                if w.window_text() and not any(word in w.window_text().casefold() for word in excluded)
-            ]
-            win = main_candidates[-1] if main_candidates else app.top_window()
-        win.wait("visible", timeout=60)
-        win.set_focus()
-        return app, win
+
+        deadline = time.time() + 60
+        last_titles = []
+        while time.time() < deadline:
+            win, visible = find_main()
+            last_titles = []
+            for candidate in visible:
+                try:
+                    last_titles.append({
+                        "title": candidate.window_text(),
+                        "handle": hex(candidate.handle),
+                        "pid": candidate.process_id(),
+                    })
+                except Exception:
+                    pass
+            if win is not None:
+                pid = win.process_id()
+                try:
+                    app.connect(process=pid, timeout=10)
+                except Exception:
+                    pass
+                win.wait("visible", timeout=30)
+                win.set_focus()
+                return app, win
+            time.sleep(0.5)
+        raise RuntimeError(f"PL9 process started/connected but main window was not found. Visible windows: {last_titles}")
 
     def _other_windows(self, pid: int, main_handle: int):
         from pywinauto import Desktop
@@ -348,49 +388,95 @@ class PL9Controller:
             if w.handle != main_handle
         ]
 
+    @staticmethod
+    def _window_info(window):
+        try:
+            return {
+                "title": window.window_text(),
+                "handle": hex(window.handle),
+                "process_id": window.process_id(),
+                "class_name": window.class_name(),
+            }
+        except Exception:
+            return {"title": str(window)}
+
     def open_chart(self, chart_path: Path, display_name: str) -> dict[str, Any]:
         pid = None
         try:
             app, win = self._connect_or_start()
-            pid = app.process
+            pid = win.process_id()
             existing = self._other_windows(pid, win.handle)
             if existing:
                 return {
                     "status": "MODAL_DIALOG_BLOCKS_OPEN",
                     "process_id": pid,
                     "main_window": win.window_text(),
-                    "blocking_windows": [w.window_text() for w in existing],
+                    "blocking_windows": [self._window_info(w) for w in existing],
                     "chart_file": str(chart_path),
                     "calculation_verified": False,
                 }
+            win.set_focus()
+            # Alt+F then O is the native File > Open command.
             win.type_keys("%fo", set_foreground=True)
             time.sleep(1.0)
             dialogs = self._other_windows(pid, win.handle)
             dialog = next(
                 (w for w in dialogs if any(
                     token in w.window_text().casefold()
-                    for token in ("open", "file manager", "chart")
+                    for token in ("open", "file manager", "chart", "открыть")
                 )),
                 None,
             )
+            # PL9's Qt Open Chart dialog can expose only the generic title "PL9".
+            # If exactly one new top-level window appeared, treat it as the dialog.
+            if dialog is None and len(dialogs) == 1:
+                dialog = dialogs[0]
             if dialog is None:
                 return {
                     "status": "OPEN_DIALOG_NOT_DETECTED",
                     "process_id": pid,
                     "main_window": win.window_text(),
-                    "visible_dialogs": [w.window_text() for w in dialogs],
+                    "visible_dialogs": [self._window_info(w) for w in dialogs],
+                    "all_process_windows": [self._window_info(w) for w in Desktop(backend="win32").windows(process=pid, visible_only=True)],
                     "chart_file": str(chart_path),
                     "calculation_verified": False,
                 }
             dialog.set_focus()
-            dialog.type_keys(chart_path.stem, with_spaces=True)
-            dialog.type_keys("{ENTER}")
-            time.sleep(2.0)
+            controls = dialog.descendants()
+            edit_controls = []
+            list_controls = []
+            for control in controls:
+                try:
+                    kind = control.friendly_class_name().casefold()
+                    if kind in {"edit", "editbox"}:
+                        edit_controls.append(control)
+                    if kind in {"listbox", "listview", "syslistview32", "list"}:
+                        list_controls.append(control)
+                except Exception:
+                    continue
+            if edit_controls:
+                edit_controls[-1].set_edit_text(chart_path.name)
+                edit_controls[-1].type_keys("{ENTER}")
+            else:
+                if list_controls:
+                    list_controls[0].set_focus()
+                dialog.type_keys(chart_path.stem, with_spaces=True)
+                time.sleep(0.35)
+                dialog.type_keys("{ENTER}")
+            time.sleep(1.5)
             title = win.window_text()
-            confirmed = display_name.casefold() in title.casefold() or chart_path.stem.casefold() in title.casefold()
+            remaining = self._other_windows(pid, win.handle)
+            confirmed = (
+                display_name.casefold() in title.casefold()
+                or chart_path.stem.casefold() in title.casefold()
+            )
             return {
                 "status": "CHART_OPEN_CONFIRMED" if confirmed else "OPEN_REQUEST_SENT_UNCONFIRMED",
-                "process_id": pid, "main_window": title, "chart_file": str(chart_path),
+                "process_id": pid,
+                "main_window": title,
+                "chart_file": str(chart_path),
+                "open_dialog": self._window_info(dialog),
+                "remaining_windows": [self._window_info(w) for w in remaining],
                 "calculation_verified": False,
             }
         except Exception as exc:
@@ -404,7 +490,7 @@ class PL9Controller:
         before_hash = hashlib.sha256(export_file.read_bytes()).hexdigest() if export_file.exists() else None
         try:
             app, win = self._connect_or_start()
-            pid = app.process
+            pid = win.process_id()
             existing = self._other_windows(pid, win.handle)
             if existing:
                 return {
@@ -523,7 +609,7 @@ class PL9Controller:
                 "status": "MENU_INPUT_SENT_UNVERIFIED",
                 "menu_path": "->".join(parts),
                 "main_window": win.window_text(),
-                "visible_windows": [w.window_text() for w in self._other_windows(app.process, win.handle)],
+                "visible_windows": [self._window_info(w) for w in self._other_windows(win.process_id(), win.handle)],
                 "calculation_verified": False,
                 "note": "Keyboard navigation was sent; the selected report content has not been independently read.",
             }
