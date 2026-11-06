@@ -311,6 +311,9 @@ jobs:
                 $typed=[Pl9WindowsProbe]::SendTestName()
                 Write-Host "PL9_TEST_NAME_KEY_EVENTS=$typed"
                 Start-Sleep -Milliseconds 350
+                $submit=[Pl9WindowsProbe]::SendEnter()
+                Write-Host "PL9_TEST_CHART_SUBMIT_ENTER_COUNT=$submit"
+                Start-Sleep -Seconds 2
                 $ownedHandles=New-Object 'System.Collections.Generic.List[System.IntPtr]'
                 $ownedInfo=New-Object 'System.Collections.Generic.List[string]'
                 $ownedCb=[Pl9WindowsProbe+WindowEnumerator] {
