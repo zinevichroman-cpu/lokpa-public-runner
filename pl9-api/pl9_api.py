@@ -262,7 +262,7 @@ class PL9Controller:
         if not self.config.exe or not self.config.exe.is_file():
             raise RuntimeError("PL9.exe not found. Set PL9_EXE to the installed executable.")
         try:
-            from pywinauto import Application
+            from pywinauto import Application, Desktop
         except ImportError as exc:
             raise RuntimeError("Install pywinauto: python -m pip install -r requirements.txt") from exc
         app = Application(backend="win32")
@@ -270,27 +270,62 @@ class PL9Controller:
             app.connect(path=str(self.config.exe), timeout=2)
         except Exception:
             app.start(f'"{self.config.exe}"', work_dir=str(self.config.exe.parent), timeout=30)
-        win = app.top_window()
+        windows = Desktop(backend="win32").windows(process=app.process, visible_only=True)
+        main_candidates = [w for w in windows if "parashara" in w.window_text().casefold()]
+        if main_candidates:
+            win = main_candidates[0]
+        else:
+            excluded = ("data entry", "file manager", "open", "save")
+            main_candidates = [
+                w for w in windows
+                if w.window_text() and not any(word in w.window_text().casefold() for word in excluded)
+            ]
+            win = main_candidates[-1] if main_candidates else app.top_window()
         win.wait("visible", timeout=60)
         win.set_focus()
         return app, win
+
+    def _other_windows(self, pid: int, main_handle: int):
+        from pywinauto import Desktop
+        return [
+            w for w in Desktop(backend="win32").windows(process=pid, visible_only=True)
+            if w.handle != main_handle
+        ]
+
     def open_chart(self, chart_path: Path, display_name: str) -> dict[str, Any]:
         pid = None
         try:
             app, win = self._connect_or_start()
             pid = app.process
-            win.type_keys("%fo", set_foreground=True)
-            time.sleep(1.0)
-            from pywinauto import Desktop
-            windows = Desktop(backend="win32").windows(process=pid, visible_only=True)
-            dialogs = [w for w in windows if w.handle != win.handle]
-            if not dialogs:
+            existing = self._other_windows(pid, win.handle)
+            if existing:
                 return {
-                    "status": "OPEN_DIALOG_NOT_DETECTED", "process_id": pid,
-                    "main_window": win.window_text(), "chart_file": str(chart_path),
+                    "status": "MODAL_DIALOG_BLOCKS_OPEN",
+                    "process_id": pid,
+                    "main_window": win.window_text(),
+                    "blocking_windows": [w.window_text() for w in existing],
+                    "chart_file": str(chart_path),
                     "calculation_verified": False,
                 }
-            dialog = dialogs[0]
+            win.type_keys("%fo", set_foreground=True)
+            time.sleep(1.0)
+            dialogs = self._other_windows(pid, win.handle)
+            dialog = next(
+                (w for w in dialogs if any(
+                    token in w.window_text().casefold()
+                    for token in ("open", "file manager", "chart")
+                )),
+                None,
+            )
+            if dialog is None:
+                return {
+                    "status": "OPEN_DIALOG_NOT_DETECTED",
+                    "process_id": pid,
+                    "main_window": win.window_text(),
+                    "visible_dialogs": [w.window_text() for w in dialogs],
+                    "chart_file": str(chart_path),
+                    "calculation_verified": False,
+                }
             dialog.set_focus()
             dialog.type_keys(chart_path.stem, with_spaces=True)
             dialog.type_keys("{ENTER}")
@@ -313,6 +348,15 @@ class PL9Controller:
         before_hash = hashlib.sha256(export_file.read_bytes()).hexdigest() if export_file.exists() else None
         try:
             app, win = self._connect_or_start()
+            pid = app.process
+            existing = self._other_windows(pid, win.handle)
+            if existing:
+                return {
+                    "status": "MODAL_DIALOG_BLOCKS_EXPORT",
+                    "blocking_windows": [w.window_text() for w in existing],
+                    "export_file": str(export_file),
+                    "calculation_verified": False,
+                }
             # Manual menu order: Research -> Search for Charts, Statistics,
             # Export Ephemeris, Export Birth Chart. Select the fourth item.
             win.set_focus()
