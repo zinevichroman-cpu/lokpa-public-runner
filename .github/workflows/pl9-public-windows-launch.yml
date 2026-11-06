@@ -159,6 +159,16 @@ jobs:
               var inputs=new Pl9Input[] { KeyInput(0x0D,0), KeyInput(0x0D,2) };
               return SendInput((uint)inputs.Length,inputs,Marshal.SizeOf(typeof(Pl9Input)));
             }
+            public static uint SendTestName() {
+              string sample="TEST_CHART_INPUT";
+              var inputs=new List<Pl9Input>();
+              foreach(char ch in sample) {
+                var press=new Pl9Input(); press.type=1; press.U.ki.wScan=(ushort)ch; press.U.ki.dwFlags=4;
+                var release=press; release.U.ki.dwFlags=6;
+                inputs.Add(press); inputs.Add(release);
+              }
+              return SendInput((uint)inputs.Count,inputs.ToArray(),Marshal.SizeOf(typeof(Pl9Input)));
+            }
             [DllImport("oleacc.dll", PreserveSig=true)]
             public static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint objectId, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out Pl9IAccessible accessible);
             [DllImport("user32.dll")] public static extern bool EnumWindows(WindowEnumerator cb, IntPtr p);
@@ -297,6 +307,10 @@ jobs:
                 $enterSent=[Pl9WindowsProbe]::SendEnter()
                 Write-Host "PL9_SENDINPUT_ENTER_COUNT=$enterSent"
                 Start-Sleep -Milliseconds 1000
+                # Synthetic string only: no personal data in the public workflow.
+                $typed=[Pl9WindowsProbe]::SendTestName()
+                Write-Host "PL9_TEST_NAME_KEY_EVENTS=$typed"
+                Start-Sleep -Milliseconds 350
                 $ownedHandles=New-Object 'System.Collections.Generic.List[System.IntPtr]'
                 $ownedInfo=New-Object 'System.Collections.Generic.List[string]'
                 $ownedCb=[Pl9WindowsProbe+WindowEnumerator] {
