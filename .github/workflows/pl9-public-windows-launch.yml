@@ -572,4 +572,4 @@ jobs:
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
-# PL9 x86 UI automation; documented Ctrl+O opens chart; exclude File Manager.
+# PL9 x86 UI automation; send Ctrl+O through native Win32 key events.
