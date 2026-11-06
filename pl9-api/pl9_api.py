@@ -561,8 +561,10 @@ class PL9Controller:
             user32.keybd_event(0x46, 0, 0x0002, 0)
             user32.keybd_event(0x12, 0, 0x0002, 0)  # Alt up
             time.sleep(0.2)
-            for _ in range(8):
-                user32.keybd_event(0x27, 0, 0, 0)  # Right
+            # Alt+F leaves the File dropdown active; the first Right
+            # closes that dropdown before moving across the menu bar.
+            for _ in range(9):
+                user32.keybd_event(0x27, 0, 0, 0)  # Right to Research
                 user32.keybd_event(0x27, 0, 0x0002, 0)
                 time.sleep(0.03)
             # Both "Export Ephemeris" and "Export Birth Chart" start with E.
@@ -666,6 +668,12 @@ class PL9Controller:
             user32.keybd_event(0x12, 0, 0x0002, 0)
             time.sleep(0.2)
             root_index = root_indexes[parts[0]]
+            if parts[0] == "Reports":
+                # First Right closes the File dropdown; Reports is the fourth
+                # menu after File in PL9's visible menu bar.
+                root_index = 4
+            elif parts[0] == "Research":
+                root_index = 9
             for _ in range(root_index):
                 user32.keybd_event(0x27, 0, 0, 0)
                 user32.keybd_event(0x27, 0, 0x0002, 0)
