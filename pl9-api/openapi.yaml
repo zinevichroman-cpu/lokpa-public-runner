@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Parashara's Light 9 Local API
-  version: 0.1.0
+  version: 0.2.0
   description: >
     Localhost-only wrapper around an installed PL9 application. It creates
     native BirthData XML and reads exports produced by PL9 itself. It is not
@@ -50,6 +50,7 @@ components:
       properties:
         birth: { $ref: '#/components/schemas/BirthInput' }
         open: { type: boolean, default: true }
+        calculate: { type: boolean, default: false, description: Open the chart and verify a fresh PL9 birth-data export against all supplied birth fields }
 paths:
   /health:
     get:
@@ -71,15 +72,19 @@ paths:
           description: API and engine identity
   /horoscope:
     post:
-      summary: LOKPA-style entry point; create native PL9 XML and request GUI open
+      summary: LOKPA-style entry point; create native PL9 XML, optionally open and verify calculation through PL9 export
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/ChartCreateRequest' }
       responses:
+        '200':
+          description: Fresh PL9 export matched the submitted birth data; calculation verified
         '201':
           description: XML file created; GUI open status is reported separately
+        '502':
+          description: XML created but PL9 calculation/export verification failed
         '400':
           description: Invalid birth input
   /charts:
@@ -116,6 +121,53 @@ paths:
         '200': { description: Open request result }
         '404': { description: Chart not found }
         '503': { description: GUI open failed }
+  /charts/{id}/calculate:
+    post:
+      summary: Open the native chart, run PL9 Export Birth Chart, and verify the exact input row
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[0-9a-f]{32}
+    post:
+      summary: Request native PL9 Research > Export Birth Chart
+      responses:
+        '200': { description: Export file changed and was parsed }
+        '202': { description: Export not confirmed; no calculation result claimed }
+  /exports/birth-data:
+    get:
+      summary: Read the latest native PL9 birth-data export
+      responses:
+        '200': { description: Parsed PL9 export rows with raw fields preserved }
+        '404': { description: Export file not found }
+  /exports/ephemeris:
+    get:
+      summary: Read PL9 Export/ephemeris.txt
+      responses:
+        '200': { description: Raw native ephemeris export }
+        '404': { description: Export file not found }
+ }
+      responses:
+        '200': { description: Fresh PL9 export row matches all submitted birth fields }
+        '404': { description: Chart or local birth metadata not found }
+        '502': { description: PL9 GUI or export verification failed; no calculation result certified }
+  /ui/menu:
+    post:
+      summary: Select a PL9 analytical menu path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [menu_path]
+              properties:
+                menu_path:
+                  type: string
+                  example: Reports->Horoscope
+      responses:
+        '200': { description: Menu selection command sent to PL9 }
+        '502': { description: Menu selection failed }
   /exports/birth-data/run:
     post:
       summary: Request native PL9 Research > Export Birth Chart
