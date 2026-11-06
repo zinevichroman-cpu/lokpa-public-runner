@@ -155,6 +155,10 @@ jobs:
               var inputs=new Pl9Input[] { KeyInput(0x12,0), KeyInput(0x46,0), KeyInput(0x46,2), KeyInput(0x12,2) };
               return SendInput((uint)inputs.Length,inputs,Marshal.SizeOf(typeof(Pl9Input)));
             }
+            public static uint SendEnter() {
+              var inputs=new Pl9Input[] { KeyInput(0x0D,0), KeyInput(0x0D,2) };
+              return SendInput((uint)inputs.Length,inputs,Marshal.SizeOf(typeof(Pl9Input)));
+            }
             [DllImport("oleacc.dll", PreserveSig=true)]
             public static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint objectId, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out Pl9IAccessible accessible);
             [DllImport("user32.dll")] public static extern bool EnumWindows(WindowEnumerator cb, IntPtr p);
@@ -289,7 +293,10 @@ jobs:
               if($focusMatch){
                 $sent=[Pl9WindowsProbe]::SendAltF()
                 Write-Host "PL9_SENDINPUT_ALT_F_COUNT=$sent"
-                Start-Sleep -Milliseconds 750
+                Start-Sleep -Milliseconds 500
+                $enterSent=[Pl9WindowsProbe]::SendEnter()
+                Write-Host "PL9_SENDINPUT_ENTER_COUNT=$enterSent"
+                Start-Sleep -Milliseconds 1000
                 $ownedHandles=New-Object 'System.Collections.Generic.List[System.IntPtr]'
                 $ownedInfo=New-Object 'System.Collections.Generic.List[string]'
                 $ownedCb=[Pl9WindowsProbe+WindowEnumerator] {
