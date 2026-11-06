@@ -572,4 +572,4 @@ jobs:
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
-# PL9 x86 native input; export birth data and open Vimshottari report.
+# PL9 native access-key navigation for Export Birth Chart and Vimshottari.
