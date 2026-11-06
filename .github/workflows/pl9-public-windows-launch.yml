@@ -100,6 +100,24 @@ jobs:
             [DispId(-5003)] void set_accName([In, MarshalAs(UnmanagedType.Struct)] object child, [In, MarshalAs(UnmanagedType.BStr)] string name);
             [DispId(-5004)] void set_accValue([In, MarshalAs(UnmanagedType.Struct)] object child, [In, MarshalAs(UnmanagedType.BStr)] string value);
           }
+          [StructLayout(LayoutKind.Sequential)]
+          public struct Pl9KeyboardInput {
+            public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public UIntPtr dwExtraInfo;
+          }
+          [StructLayout(LayoutKind.Sequential)]
+          public struct Pl9MouseInput {
+            public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public UIntPtr dwExtraInfo;
+          }
+          [StructLayout(LayoutKind.Explicit)]
+          public struct Pl9InputUnion {
+            [FieldOffset(0)] public Pl9KeyboardInput ki;
+            [FieldOffset(0)] public Pl9MouseInput mi;
+          }
+          [StructLayout(LayoutKind.Sequential)]
+          public struct Pl9Input {
+            public uint type;
+            public Pl9InputUnion U;
+          }
           public class Pl9WindowsProbe {
             public delegate bool WindowEnumerator(IntPtr hwnd, IntPtr lparam);
             [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hwnd, WindowEnumerator cb, IntPtr p);
@@ -109,6 +127,22 @@ jobs:
             [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr menu);
             [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
             [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll", SetLastError=true)]
+            public static extern uint SendInput(uint count, [In] Pl9Input[] inputs, int size);
+            private static Pl9Input KeyInput(ushort key, uint flags) {
+              var input=new Pl9Input();
+              input.type=1;
+              input.U.ki.wVk=key;
+              input.U.ki.wScan=0;
+              input.U.ki.dwFlags=flags;
+              input.U.ki.time=0;
+              input.U.ki.dwExtraInfo=UIntPtr.Zero;
+              return input;
+            }
+            public static uint SendAltF() {
+              var inputs=new Pl9Input[] { KeyInput(0x12,0), KeyInput(0x46,0), KeyInput(0x46,2), KeyInput(0x12,2) };
+              return SendInput((uint)inputs.Length,inputs,Marshal.SizeOf(typeof(Pl9Input)));
+            }
             [DllImport("oleacc.dll", PreserveSig=true)]
             public static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint objectId, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out Pl9IAccessible accessible);
             [DllImport("user32.dll")] public static extern bool EnumWindows(WindowEnumerator cb, IntPtr p);
@@ -234,6 +268,55 @@ jobs:
               Write-Host "PL9_QT_NATIVE_WINDOWS=$env:QT_USE_NATIVE_WINDOWS"
               Write-Host "PL9_SESSION_APP=$($proc.SessionId) RUNNER=$([System.Diagnostics.Process]::GetCurrentProcess().SessionId)"
               Write-Host "PL9_GUI_WINDOW_HANDLE=$($result.window_handle) UIA_TREE_OBSERVATION_ONLY=true"
+              # One non-destructive OS-level input probe: Alt+F opens the File menu if the Qt menu bar accepts it.
+              $focusRequest=[Pl9WindowsProbe]::SetForegroundWindow($handle)
+              Start-Sleep -Milliseconds 250
+              $foregroundHandle=[Pl9WindowsProbe]::GetForegroundWindow()
+              $focusMatch=($foregroundHandle -eq $handle)
+              Write-Host "PL9_FOCUS_REQUEST=$focusRequest FOREGROUND_MATCH=$focusMatch"
+              if($focusMatch){
+                $sent=[Pl9WindowsProbe]::SendAltF()
+                Write-Host "PL9_SENDINPUT_ALT_F_COUNT=$sent"
+                Start-Sleep -Milliseconds 750
+                $ownedHandles=New-Object 'System.Collections.Generic.List[System.IntPtr]'
+                $ownedInfo=New-Object 'System.Collections.Generic.List[string]'
+                $ownedCb=[Pl9WindowsProbe+WindowEnumerator] {
+                  param($h,$unused)
+                  $ownerProcessId=[uint32]0
+                  [Pl9WindowsProbe]::GetWindowThreadProcessId($h,[ref]$ownerProcessId) | Out-Null
+                  if($ownerProcessId -eq [uint32]$proc.Id -and [Pl9WindowsProbe]::IsWindowVisible($h)){
+                    $ownedHandles.Add($h)
+                    $ownedInfo.Add("HWND=0x"+$h.ToInt64().ToString('X')+" "+[Pl9WindowsProbe]::Info($h))
+                  }
+                  return $true
+                }
+                [Pl9WindowsProbe]::EnumWindows($ownedCb,[IntPtr]::Zero) | Out-Null
+                Write-Host "PL9_OWNED_VISIBLE_WINDOWS=$($ownedHandles.Count)"
+                $ownedInfo | ForEach-Object { Write-Host "PL9_OWNED_WINDOW: $_" }
+                try {
+                  $afterRoot=[System.Windows.Automation.AutomationElement]::FromHandle($handle)
+                  $afterNodes=$afterRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+                  Write-Host "PL9_AFTER_ALT_F_MAIN_UIA_DESCENDANTS=$($afterNodes.Count)"
+                  for($j=0;$j -lt [Math]::Min($afterNodes.Count,30);$j++){
+                    $el=$afterNodes.Item($j)
+                    Write-Host "PL9_AFTER_ALT_F_NODE[$j]=TYPE:$($el.Current.ControlType.ProgrammaticName); NAME:$($el.Current.Name); ID:$($el.Current.AutomationId)"
+                  }
+                  for($w=0;$w -lt $ownedHandles.Count;$w++){
+                    if($ownedHandles[$w] -eq $handle){continue}
+                    $otherRoot=[System.Windows.Automation.AutomationElement]::FromHandle($ownedHandles[$w])
+                    if($null -ne $otherRoot){
+                      $otherNodes=$otherRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+                      Write-Host "PL9_AFTER_ALT_F_WINDOW[$w]_UIA_DESCENDANTS=$($otherNodes.Count)"
+                      for($j=0;$j -lt [Math]::Min($otherNodes.Count,15);$j++){
+                        $el=$otherNodes.Item($j)
+                        Write-Host "PL9_AFTER_ALT_F_WINDOW[$w]_NODE[$j]=TYPE:$($el.Current.ControlType.ProgrammaticName); NAME:$($el.Current.Name); ID:$($el.Current.AutomationId)"
+                      }
+                    }
+                  }
+                } catch {
+                  Write-Host "PL9_AFTER_ALT_F_UIA_ERROR=$($_.Exception.Message)"
+                }
+              }
             }
           } catch {
             $result.error=$_.Exception.Message
