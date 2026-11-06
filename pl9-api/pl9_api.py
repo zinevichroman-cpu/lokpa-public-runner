@@ -565,10 +565,13 @@ class PL9Controller:
                 user32.keybd_event(0x27, 0, 0, 0)  # Right
                 user32.keybd_event(0x27, 0, 0x0002, 0)
                 time.sleep(0.03)
-            for _ in range(4):
-                user32.keybd_event(0x28, 0, 0, 0)  # Down
-                user32.keybd_event(0x28, 0, 0x0002, 0)
-                time.sleep(0.03)
+            # Both "Export Ephemeris" and "Export Birth Chart" start with E.
+            # Type E to focus the first, then Down once to the second.
+            user32.keybd_event(0x45, 0, 0, 0)  # E
+            user32.keybd_event(0x45, 0, 0x0002, 0)
+            time.sleep(0.1)
+            user32.keybd_event(0x28, 0, 0, 0)  # Down to Export Birth Chart
+            user32.keybd_event(0x28, 0, 0x0002, 0)
             user32.keybd_event(0x0D, 0, 0, 0)  # Enter
             user32.keybd_event(0x0D, 0, 0x0002, 0)
             deadline = time.time() + 25
@@ -669,16 +672,14 @@ class PL9Controller:
                 time.sleep(0.03)
             time.sleep(0.15)
             if parts[0] == "Reports" and parts[1] == "Dashas" and len(parts) >= 3 and parts[2] == "Vimshottari":
-                # Reports menu order: Horoscope, Calculations, Interpretations, Dashas.
-                for _ in range(4):
-                    user32.keybd_event(0x28, 0, 0, 0)
-                    user32.keybd_event(0x28, 0, 0x0002, 0)
-                    time.sleep(0.03)
+                # Select the Reports > Dashas submenu by its unique initial D,
+                # then select Vimshottari by V in that submenu.
+                user32.keybd_event(0x44, 0, 0, 0)  # D
+                user32.keybd_event(0x44, 0, 0x0002, 0)
                 user32.keybd_event(0x0D, 0, 0, 0)
                 user32.keybd_event(0x0D, 0, 0x0002, 0)
                 time.sleep(0.2)
-                # Vimshottari is the first dasha report in PL9's Dashas submenu.
-                user32.keybd_event(0x56, 0, 0, 0)
+                user32.keybd_event(0x56, 0, 0, 0)  # V
                 user32.keybd_event(0x56, 0, 0x0002, 0)
                 user32.keybd_event(0x0D, 0, 0, 0)
                 user32.keybd_event(0x0D, 0, 0x0002, 0)
