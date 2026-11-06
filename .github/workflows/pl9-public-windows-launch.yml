@@ -529,4 +529,4 @@ jobs:
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
-# Retry PL9 native calculation after fixing Qt popup vs Open dialog handling.
+# Retry PL9 native calculation after explicit File > Open navigation and Qt dialog filtering.
