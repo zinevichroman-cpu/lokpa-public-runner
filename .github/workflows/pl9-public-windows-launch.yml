@@ -572,4 +572,4 @@ jobs:
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
-# PL9 x86 UI automation; Desktop diagnostic import fixed; capture native Vimshottari.
+# PL9 x86 UI automation; documented Ctrl+O opens chart; exclude File Manager.
