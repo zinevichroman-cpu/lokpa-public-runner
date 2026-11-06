@@ -418,13 +418,22 @@ class PL9Controller:
                     "calculation_verified": False,
                 }
             win.set_focus()
-            # Alt+F then O is the native File > Open command.
-            win.type_keys("%fo", set_foreground=True)
+            # Use separate native key events: Alt+F, choose Open, then activate.
+            # A single "%fo" sequence previously left a Qt popup menu open.
+            win.type_keys("%f", set_foreground=True)
+            time.sleep(0.25)
+            win.type_keys("o")
+            time.sleep(0.25)
+            win.type_keys("{ENTER}")
             dialog = None
             dialogs = []
             deadline = time.time() + 12
+            popup_classes = {"qt5qwindowpopupdropshadowsavebits", "qt5qwindowtool"}
             while time.time() < deadline:
-                dialogs = self._other_windows(pid, win.handle)
+                dialogs = [
+                    w for w in self._other_windows(pid, win.handle)
+                    if w.class_name().casefold() not in popup_classes
+                ]
                 dialog = next(
                     (w for w in dialogs if any(
                         token in w.window_text().casefold()
@@ -433,7 +442,7 @@ class PL9Controller:
                     None,
                 )
                 # PL9's Qt Open Chart dialog can expose only the generic title "PL9".
-                # If exactly one new top-level window appeared, treat it as the dialog.
+                # Accept one non-menu Qt window as the generic file dialog.
                 if dialog is None and len(dialogs) == 1:
                     dialog = dialogs[0]
                 if dialog is not None:
