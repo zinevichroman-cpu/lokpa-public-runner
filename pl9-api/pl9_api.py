@@ -492,13 +492,23 @@ class PL9Controller:
                         list_controls.append(control)
                 except Exception:
                     continue
-            if edit_controls:
-                edit_controls[-1].set_edit_text(str(chart_path))
-                edit_controls[-1].type_keys("{ENTER}")
+            file_name_edit = None
+            for control in edit_controls:
+                try:
+                    if control.control_id() == 1152:
+                        file_name_edit = control
+                        break
+                except Exception:
+                    continue
+            if file_name_edit is not None:
+                file_name_edit.set_focus()
+                file_name_edit.set_edit_text(str(chart_path))
+                file_name_edit.type_keys("{ENTER}")
             else:
-                # Qt's native file picker supports Ctrl+L to focus the location field.
+                # The standard PL9 "Open chart" dialog uses the File name field
+                # (Alt+N), not the Explorer location bar (Ctrl+L).
                 dialog.set_focus()
-                dialog.type_keys("^l")
+                dialog.type_keys("%n")
                 time.sleep(0.2)
                 dialog.type_keys(str(chart_path), with_spaces=True)
                 time.sleep(0.2)
