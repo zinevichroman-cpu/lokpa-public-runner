@@ -415,10 +415,14 @@ class PL9Controller:
                 }
             # PL9 manual: Research menu order is Search for Charts, Statistics,
             # Export Ephemeris, Export Birth Chart. The fourth entry is selected.
+            # PL9's Qt menu bar is not exposed as a Win32 HMENU.
+            # Alt+F is confirmed by the Windows probe; Research is the 10th
+            # top-level menu after File (nine Right steps). Its documented
+            # fourth item is Export Birth Chart.
             win.set_focus()
-            win.type_keys("%r", set_foreground=True)
-            time.sleep(0.25)
-            win.type_keys("{DOWN 3}{ENTER}")
+            win.type_keys("%f", set_foreground=True)
+            time.sleep(0.2)
+            win.type_keys("{RIGHT 9}{DOWN}{DOWN 3}{ENTER}")
             deadline = time.time() + 25
             while time.time() < deadline:
                 if export_file.exists():
@@ -492,16 +496,36 @@ class PL9Controller:
         if len(parts) < 2 or len(parts) > 5 or parts[0] not in allowed_roots or any(not p for p in parts):
             raise RequestError("menu_path must be a PL9 menu path beginning with Reports, Research, Charts, Print, Tools, Interpretations or Classical references")
         app, win = self._connect_or_start()
+        root_indexes = {
+            "Charts": 2, "Reports": 3, "Interpretations": 4,
+            "Classical references": 5, "Tools": 7, "Print": 8, "Research": 9,
+        }
         win.set_focus()
         try:
-            win.menu_select("->".join(parts))
+            # Qt's menu bar has no Win32 HMENU (GetMenu returned NULL in the
+            # Windows probe). Navigate from the confirmed File hotkey instead.
+            win.type_keys("%f", set_foreground=True)
+            time.sleep(0.15)
+            root_index = root_indexes[parts[0]]
+            if root_index:
+                win.type_keys(f"{{RIGHT {root_index}}}")
+            time.sleep(0.15)
+            win.type_keys("{DOWN}")
+            for segment in parts[1:]:
+                time.sleep(0.15)
+                if parts[0] == "Research" and segment == "Export Birth Chart":
+                    win.type_keys("{DOWN 3}")
+                else:
+                    win.type_keys(segment, with_spaces=True)
+                win.type_keys("{ENTER}")
             time.sleep(0.35)
             return {
-                "status": "MENU_SELECTION_SENT",
+                "status": "MENU_INPUT_SENT_UNVERIFIED",
                 "menu_path": "->".join(parts),
                 "main_window": win.window_text(),
                 "visible_windows": [w.window_text() for w in self._other_windows(app.process, win.handle)],
                 "calculation_verified": False,
+                "note": "Keyboard navigation was sent; the selected report content has not been independently read.",
             }
         except Exception as exc:
             return {
@@ -648,7 +672,7 @@ class PL9RequestHandler(BaseHTTPRequestHandler):
                 data = self._body()
                 menu_path = _required_text(data, "menu_path", 240)
                 result = self.controller.select_menu(menu_path)
-                self._send(200 if result.get("status") == "MENU_SELECTION_SENT" else 502, result)
+                self._send(202 if result.get("status") == "MENU_INPUT_SENT_UNVERIFIED" else 502, result)
                 return
             chart_id = _chart_id_from_path(path)
             if chart_id and path.endswith("/calculate"):
