@@ -445,3 +445,84 @@ jobs:
             ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             if ($null -ne $proc) { $proc.Refresh(); if(-not $proc.HasExited){Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue} }
           }
+
+      - name: Set up Python for PL9 API integration
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PL9 API dependency and run contract tests on Windows
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $apiDir = Join-Path $env:GITHUB_WORKSPACE 'pl9-api'
+          python -m pip install --disable-pip-version-check -r (Join-Path $apiDir 'requirements.txt')
+          python -m compileall -q $apiDir
+          python -m unittest discover -s $apiDir -v
+
+      - name: PL9 API Windows integration smoke test
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $apiDir = Join-Path $env:GITHUB_WORKSPACE 'pl9-api'
+          $env:PL9_EXE = (Resolve-Path -LiteralPath $env:PL9_EXE).Path
+          $geoVision = Split-Path -Parent (Split-Path -Parent $env:PL9_EXE)
+          $env:PL9_CHARTS_DIR = Join-Path $geoVision 'GeovisionCharts'
+          $env:PL9_EXPORT_DIR = Join-Path (Split-Path -Parent $env:PL9_EXE) 'Export'
+          $env:PL9_API_PORT = '10810'
+          $env:PL9_API_KEY = 'pl9-smoke-' + [guid]::NewGuid().ToString('N')
+          $stdout = Join-Path $env:RUNNER_TEMP 'pl9-api.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'pl9-api.stderr.log'
+          $python = (Get-Command python -ErrorAction Stop).Source
+          $server = $null
+          try {
+            $server = Start-Process -FilePath $python -ArgumentList @('pl9_api.py') -WorkingDirectory $apiDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            $health = $null
+            for ($i = 0; $i -lt 40; $i++) {
+              if ($server.HasExited) { throw "PL9 API server exited early. $((Get-Content $stderr -Raw -ErrorAction SilentlyContinue))" }
+              try {
+                $health = Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:10810/health' -Headers @{ 'X-API-Key' = $env:PL9_API_KEY } -TimeoutSec 3
+                break
+              } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $health -or -not $health.executable_found) { throw 'PL9 API health check failed or PL9.exe was not found.' }
+            Write-Host "PL9_API_HEALTH executable_found=$($health.executable_found) process_running=$($health.process_running)"
+            $payload = @{
+              birth = @{
+                name = 'PL9_API_SMOKE_20261106'
+                gender = 'male'
+                date = '1977-02-23'
+                time = '15:08:00'
+                utc_offset_hours = 5
+                dst_hours = 0
+                longitude_east_deg = 61.9166667
+                latitude_north_deg = 56.4
+                city = "Kamensk-ural'skiy"
+                state = "Sverdlovskaya Oblast'"
+                country = 'Russia'
+                bd_lookup_mode = 'S'
+              }
+              open = $true
+              calculate = $true
+            } | ConvertTo-Json -Depth 6
+            try {
+              $result = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:10810/horoscope' -Headers @{ 'X-API-Key' = $env:PL9_API_KEY } -ContentType 'application/json' -Body $payload -TimeoutSec 90
+            } catch {
+              if ($_.ErrorDetails.Message) { Write-Host "PL9_API_RESPONSE=$($_.ErrorDetails.Message)" }
+              throw
+            }
+            $result | ConvertTo-Json -Depth 12 | Write-Host
+            if (-not $result.calculation_verified) { throw 'PL9 API did not verify a matching native PL9 birth-data export.' }
+            if (-not $result.operation.export.matched_chart) { throw 'Verified response did not include the matched PL9 export row.' }
+            Write-Host 'PL9_API_REAL_CALCULATION_VERIFIED=true'
+          } finally {
+            if ($null -ne $server) {
+              $server.Refresh()
+              if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
+            }
+            Get-CimInstance Win32_Process -Filter "Name='PL9.exe'" |
+              Where-Object { $_.ExecutablePath -eq $env:PL9_EXE } |
+              ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            if (Test-Path $stdout) {
+              Get-Content $stdout | Where-Object { $_ -notmatch '^API key \(X-API-Key\):' } | ForEach-Object { Write-Host $_ }
+            }
+            if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
+          }
