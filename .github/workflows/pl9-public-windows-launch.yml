@@ -450,6 +450,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          architecture: x86
 
       - name: Checkout public API source
         uses: actions/checkout@v4
@@ -513,6 +514,48 @@ jobs:
               throw
             }
             $result | ConvertTo-Json -Depth 12 | Write-Host
+            function Write-Pl9ScreenSnapshot {
+              param([string]$Label)
+              try {
+                Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+                Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+                $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+                $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+                $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                $stream = [System.IO.MemoryStream]::new()
+                try {
+                  $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+                  $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+                  $bytes = $stream.ToArray()
+                  $b64 = [Convert]::ToBase64String($bytes)
+                  Write-Host "PL9_SCREENSHOT_${Label}_BYTES=$($bytes.Length)"
+                  $chunk = 0
+                  for ($offset = 0; $offset -lt $b64.Length; $offset += 3000) {
+                    $count = [Math]::Min(3000, $b64.Length - $offset)
+                    Write-Host "PL9_SCREENSHOT_${Label}_B64[$chunk]=$($b64.Substring($offset, $count))"
+                    $chunk++
+                  }
+                } finally {
+                  $stream.Dispose()
+                  $graphics.Dispose()
+                  $bitmap.Dispose()
+                }
+              } catch {
+                Write-Host "PL9_SCREENSHOT_${Label}_ERROR=$($_.Exception.Message)"
+              }
+            }
+            Write-Pl9ScreenSnapshot -Label 'AFTER_CALCULATION'
+            if ($result.calculation_verified) {
+              $dashaBody = @{ menu_path = 'Reports->Dashas->Vimshottari' } | ConvertTo-Json -Compress
+              try {
+                $dashaResult = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:10810/ui/menu' -Headers @{ 'X-API-Key' = $env:PL9_API_KEY } -ContentType 'application/json' -Body $dashaBody -TimeoutSec 20
+                $dashaResult | ConvertTo-Json -Depth 8 | Write-Host
+                Start-Sleep -Seconds 2
+                Write-Pl9ScreenSnapshot -Label 'VIMSHOTTARI'
+              } catch {
+                Write-Host "PL9_DASHA_MENU_ERROR=$($_.Exception.Message)"
+              }
+            }
             if (-not $result.calculation_verified) { throw 'PL9 API did not verify a matching native PL9 birth-data export.' }
             if (-not $result.operation.export.matched_chart) { throw 'Verified response did not include the matched PL9 export row.' }
             Write-Host 'PL9_API_REAL_CALCULATION_VERIFIED=true'
@@ -529,4 +572,4 @@ jobs:
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
-# Retry PL9 native calculation after explicit File > Open navigation and Qt dialog filtering.
+# PL9 x86 UI automation; capture verified chart and native Vimshottari report.
