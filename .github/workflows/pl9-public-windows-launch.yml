@@ -76,6 +76,30 @@ jobs:
           using System.Text;
           using System.Collections.Generic;
           using System.Runtime.InteropServices;
+          [ComImport, Guid("618736E0-3C3D-11CF-810C-00AA00389B71"), InterfaceType(ComInterfaceType.InterfaceIsDual)]
+          public interface Pl9IAccessible {
+            [DispId(-5000)] object get_accParent();
+            [DispId(-5001)] int get_accChildCount();
+            [DispId(-5002), return: MarshalAs(UnmanagedType.IDispatch)] object get_accChild([In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5003), return: MarshalAs(UnmanagedType.BStr)] string get_accName([In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5004), return: MarshalAs(UnmanagedType.BStr)] string get_accValue([In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5005), return: MarshalAs(UnmanagedType.BStr)] string get_accDescription([In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5006), return: MarshalAs(UnmanagedType.Struct)] object get_accRole([In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5007), return: MarshalAs(UnmanagedType.Struct)] object get_accState([In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5008), return: MarshalAs(UnmanagedType.BStr)] string get_accHelp([In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5009)] int get_accHelpTopic([Out, MarshalAs(UnmanagedType.BStr)] out string helpFile, [In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5010), return: MarshalAs(UnmanagedType.BStr)] string get_accKeyboardShortcut([In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5011), return: MarshalAs(UnmanagedType.Struct)] object get_accFocus();
+            [DispId(-5012), return: MarshalAs(UnmanagedType.Struct)] object get_accSelection();
+            [DispId(-5013), return: MarshalAs(UnmanagedType.BStr)] string get_accDefaultAction([In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5014)] void accSelect(int flags, [In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5015)] void accLocation(out int left, out int top, out int width, out int height, [In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5016), return: MarshalAs(UnmanagedType.Struct)] object accNavigate(int direction, [In, MarshalAs(UnmanagedType.Struct)] object start);
+            [DispId(-5017), return: MarshalAs(UnmanagedType.Struct)] object accHitTest(int x, int y);
+            [DispId(-5018)] void accDoDefaultAction([In, MarshalAs(UnmanagedType.Struct)] object child);
+            [DispId(-5003)] void set_accName([In, MarshalAs(UnmanagedType.Struct)] object child, [In, MarshalAs(UnmanagedType.BStr)] string name);
+            [DispId(-5004)] void set_accValue([In, MarshalAs(UnmanagedType.Struct)] object child, [In, MarshalAs(UnmanagedType.BStr)] string value);
+          }
           public class Pl9WindowsProbe {
             public delegate bool WindowEnumerator(IntPtr hwnd, IntPtr lparam);
             [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hwnd, WindowEnumerator cb, IntPtr p);
@@ -85,6 +109,8 @@ jobs:
             [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr menu);
             [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
             [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+            [DllImport("oleacc.dll", PreserveSig=true)]
+            public static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint objectId, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out Pl9IAccessible accessible);
             [DllImport("user32.dll")] public static extern bool EnumWindows(WindowEnumerator cb, IntPtr p);
             [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
             [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
@@ -117,7 +143,8 @@ jobs:
             if ($handle -ne [IntPtr]::Zero) {
               $result.window_class=[Pl9WindowsProbe]::Info($handle)
               $kids=New-Object 'System.Collections.Generic.List[string]'
-              $cb=[Pl9WindowsProbe+WindowEnumerator] { param($h,$unused) if($kids.Count -lt 80){$kids.Add([Pl9WindowsProbe]::Info($h))}; return $true }
+              $kidHandles=New-Object 'System.Collections.Generic.List[System.IntPtr]'
+              $cb=[Pl9WindowsProbe+WindowEnumerator] { param($h,$unused) if($kids.Count -lt 80){$kids.Add([Pl9WindowsProbe]::Info($h));$kidHandles.Add($h)}; return $true }
               [Pl9WindowsProbe]::EnumChildWindows($handle,$cb,[IntPtr]::Zero) | Out-Null
               $result.child_count=$kids.Count
               Write-Host "TOP_WINDOW=$($result.window_class)"
@@ -147,6 +174,55 @@ jobs:
               } catch {
                 Write-Host "PL9_UIA_READ_ONLY_ERROR=$($_.Exception.Message)"
               }
+              # Read-only MSAA/IAccessible tree probe; no UI actions are invoked.
+              $script:pl9MsaaNodeCount=0
+              function Write-Pl9MsaaTree {
+                param([Pl9IAccessible]$Accessible,[int]$Depth,[string]$Path)
+                if ($Depth -ge 5 -or $script:pl9MsaaNodeCount -ge 100) { return }
+                $childCount=0
+                try { $childCount=$Accessible.get_accChildCount() } catch { Write-Host "MSAA_CHILDCOUNT_ERROR path=$Path error=$($_.Exception.Message)"; return }
+                $limit=[Math]::Min([Math]::Max($childCount,0),60)
+                for($childId=1; $childId -le $limit -and $script:pl9MsaaNodeCount -lt 100; $childId++){
+                  $childName=''; $childRole=''; $childState=''; $shortcut=''; $defaultAction=''
+                  try { $childName=[string]$Accessible.get_accName([object]$childId) } catch {}
+                  try { $childRole=[string]$Accessible.get_accRole([object]$childId) } catch {}
+                  try { $childState=[string]$Accessible.get_accState([object]$childId) } catch {}
+                  try { $shortcut=[string]$Accessible.get_accKeyboardShortcut([object]$childId) } catch {}
+                  try { $defaultAction=[string]$Accessible.get_accDefaultAction([object]$childId) } catch {}
+                  $script:pl9MsaaNodeCount++
+                  Write-Host "MSAA_NODE[$($script:pl9MsaaNodeCount)] DEPTH=$Depth CHILD=$childId ROLE=$childRole NAME=$childName SHORTCUT=$shortcut ACTION=$defaultAction STATE=$childState"
+                  $nested=$null
+                  try { $nested=$Accessible.get_accChild([object]$childId) } catch {}
+                  if ($null -ne $nested -and $nested -is [Pl9IAccessible]) {
+                    Write-Pl9MsaaTree -Accessible $nested -Depth ($Depth+1) -Path "$Path/$childId"
+                  }
+                }
+              }
+              $msaaTargets=New-Object 'System.Collections.Generic.List[object]'
+              $msaaTargets.Add([pscustomobject]@{Handle=$handle;Label='TOP'})
+              for($i=0; $i -lt [Math]::Min($kidHandles.Count,20); $i++){
+                $msaaTargets.Add([pscustomobject]@{Handle=$kidHandles[$i];Label="CHILD$i"})
+              }
+              $iid=[guid]'618736E0-3C3D-11CF-810C-00AA00389B71'
+              foreach($target in $msaaTargets){
+                $objectIds=if($target.Label -eq 'TOP'){@([uint32]4294967292,[uint32]0)}else{@([uint32]4294967292)}
+                foreach($objectId in $objectIds){
+                  $accessible=$null
+                  $localIid=$iid
+                  $hr=[Pl9WindowsProbe]::AccessibleObjectFromWindow($target.Handle,$objectId,[ref]$localIid,[ref]$accessible)
+                  if($hr -eq 0 -and $null -ne $accessible){
+                    $rootName=''; $rootRole=''; $rootCount=0
+                    try { $rootName=[string]$accessible.get_accName([object]0) } catch {}
+                    try { $rootRole=[string]$accessible.get_accRole([object]0) } catch {}
+                    try { $rootCount=$accessible.get_accChildCount() } catch {}
+                    Write-Host "MSAA_ROOT=$($target.Label) OBJID=$objectId ROLE=$rootRole NAME=$rootName CHILDREN=$rootCount"
+                    if($rootCount -gt 0){ Write-Pl9MsaaTree -Accessible $accessible -Depth 0 -Path $target.Label }
+                  } else {
+                    Write-Host "MSAA_ROOT=$($target.Label) OBJID=$objectId HRESULT=$hr"
+                  }
+                }
+              }
+              Write-Host "MSAA_TOTAL_NODES=$script:pl9MsaaNodeCount"
               Write-Host "WIN32_CHILD_COUNT_AT_LEAST=$($kids.Count)"
               $kids | ForEach-Object { Write-Host "CHILD: $_" }
               $menu=[Pl9WindowsProbe]::GetMenu($handle)
@@ -176,6 +252,7 @@ jobs:
               "| Top-level HWND | $($result.window_handle) |",
               "| Child HWND count (capped at 80) | $($result.child_count) |",
               "| Win32 root menu exists | $($result.root_menu_present) |",
+              "| MSAA nodes exposed | $script:pl9MsaaNodeCount |",
               "| Natal calculations | NOT CALCULATED |",
               "| Transit/Vimshottari | NOT CALCULATED |"
             ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
