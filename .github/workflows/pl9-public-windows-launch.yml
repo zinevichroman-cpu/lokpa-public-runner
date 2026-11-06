@@ -451,13 +451,16 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Checkout public API source
+        uses: actions/checkout@v4
+
       - name: Install PL9 API dependency and run contract tests on Windows
+        working-directory: pl9-api
         run: |
           $ErrorActionPreference = 'Stop'
-          $apiDir = Join-Path $env:GITHUB_WORKSPACE 'pl9-api'
-          python -m pip install --disable-pip-version-check -r (Join-Path $apiDir 'requirements.txt')
-          python -m compileall -q $apiDir
-          python -m unittest discover -s $apiDir -v
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m compileall -q .
+          python -m unittest -v
 
       - name: PL9 API Windows integration smoke test
         run: |
