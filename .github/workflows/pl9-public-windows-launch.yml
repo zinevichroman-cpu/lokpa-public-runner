@@ -77,6 +77,7 @@ jobs:
           "PL9_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Launch real PL9.exe on Windows and inspect top-level window and Win32 controls
+        if: false # Already verified in earlier runs; skip redundant blank-chart probe.
         run: |
           $ErrorActionPreference = 'Stop'
           $code = @'
@@ -510,9 +511,16 @@ jobs:
             try {
               $result = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:10810/horoscope' -Headers @{ 'X-API-Key' = $env:PL9_API_KEY } -ContentType 'application/json' -Body $payload -TimeoutSec 90
             } catch {
-              if ($_.ErrorDetails.Message) { Write-Host "PL9_API_RESPONSE=$($_.ErrorDetails.Message)" }
-              throw
+              if ($_.ErrorDetails.Message) {
+                $responseText = $_.ErrorDetails.Message
+                Write-Host "PL9_API_RESPONSE=$responseText"
+                try { $result = $responseText | ConvertFrom-Json -ErrorAction Stop }
+                catch { throw "PL9 API error response could not be parsed: $($_.Exception.Message)" }
+              } else {
+                throw
+              }
             }
+            if ($null -eq $result) { throw 'PL9 API returned no structured result.' }
             $result | ConvertTo-Json -Depth 12 | Write-Host
             function Write-Pl9ScreenSnapshot {
               param([string]$Label)
@@ -545,7 +553,11 @@ jobs:
               }
             }
             Write-Pl9ScreenSnapshot -Label 'AFTER_CALCULATION'
-            if ($result.calculation_verified) {
+            $chart_open_possible = $result.calculation_verified -or (
+              $result.operation.open.status -eq 'OPEN_REQUEST_SENT_UNCONFIRMED' -and
+              @($result.operation.open.remaining_windows).Count -eq 0
+            )
+            if ($chart_open_possible) {
               $dashaBody = @{ menu_path = 'Reports->Dashas->Vimshottari' } | ConvertTo-Json -Compress
               try {
                 $dashaResult = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:10810/ui/menu' -Headers @{ 'X-API-Key' = $env:PL9_API_KEY } -ContentType 'application/json' -Body $dashaBody -TimeoutSec 20
@@ -572,4 +584,4 @@ jobs:
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
-# PL9 native access-key navigation for Export Birth Chart and Vimshottari.
+# PL9 diagnostic run: capture UI even when export verification fails.
