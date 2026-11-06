@@ -12,7 +12,7 @@ permissions:
 jobs:
   pl9:
     runs-on: windows-2022
-    timeout-minutes: 50
+    timeout-minutes: 10
     defaults:
       run:
         shell: pwsh
@@ -99,6 +99,7 @@ jobs:
           $exe=$env:PL9_EXE
           $wd=Split-Path -Parent $exe
           $env:QT_ACCESSIBILITY = '1'
+          $env:QT_USE_NATIVE_WINDOWS = '1'
           $proc=$null
           $result=[ordered]@{ engine='Parasharas Light 9'; executable_verified=$true; process_started=$false; process_alive_after_15s=$false; process_id=$null; window_handle=$null; window_title=$null; window_class=$null; child_count=0; root_menu_present=$false; root_menu_items=0; calculations_verified=$false; export_verified=$false; error=$null }
           try {
@@ -127,6 +128,11 @@ jobs:
                 if ($null -ne $root) {
                   $nodes = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
                   Write-Host "PL9_QT_ACCESSIBILITY=$env:QT_ACCESSIBILITY UIA_DESCENDANTS=$($nodes.Count)"
+                  $uiElements = [Math]::Min($nodes.Count, 30)
+                  for($index=0; $index -lt $uiElements; $index++){
+                    $element=$nodes.Item($index)
+                    Write-Host "PL9_UIA_NODE[$index]=TYPE:$($element.Current.ControlType.ProgrammaticName); NAME:$($element.Current.Name); ID:$($element.Current.AutomationId)"
+                  }
                   $allowed = '^(File|New|Open|Birth Data|Birth Details|Research|Export|Save|OK|Cancel|Edit|Chart|Charts|Dasha|Dasas|Vimshottari)$'
                   $k = 0
                   foreach ($node in $nodes) {
@@ -147,35 +153,11 @@ jobs:
               $result.root_menu_present=($menu -ne [IntPtr]::Zero)
               if($result.root_menu_present){$result.root_menu_items=[Pl9WindowsProbe]::GetMenuItemCount($menu)}
               Write-Host "WIN32_ROOT_MENU=$($result.root_menu_present) ITEMS=$($result.root_menu_items)"
-              # Non-destructive focus/menu probe. ALT+F opens File menu only if an
-              # interactive desktop and Qt keyboard routing are actually working.
-              try {
-                Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
-                $focusResult=[Pl9WindowsProbe]::SetForegroundWindow($handle)
-                Start-Sleep -Milliseconds 450
-                $active=[Pl9WindowsProbe]::GetForegroundWindow()
-                Write-Host "FOCUS_REQUEST_RESULT=$focusResult FOREGROUND_MATCH=$($active -eq $handle)"
-                if($active -eq $handle) {
-                  [System.Windows.Forms.SendKeys]::Send('%f')
-                  Start-Sleep -Milliseconds 900
-                  $popupList=New-Object 'System.Collections.Generic.List[string]'
-                  $enumCb=[Pl9WindowsProbe+WindowEnumerator] {
-                    param($window,$lparam)
-                    [uint32]$targetPid=0
-                    [Pl9WindowsProbe]::GetWindowThreadProcessId($window,[ref]$targetPid) | Out-Null
-                    if(($targetPid -eq $proc.Id) -and ([Pl9WindowsProbe]::IsWindowVisible($window))) {
-                      $popupList.Add([Pl9WindowsProbe]::Info($window))
-                    }
-                    return $true
-                  }
-                  [Pl9WindowsProbe]::EnumWindows($enumCb,[IntPtr]::Zero) | Out-Null
-                  Write-Host "PL9_VISIBLE_TOP_LEVEL_AFTER_ALT_F=$($popupList.Count)"
-                  $popupList | ForEach-Object { Write-Host "PL9_VISIBLE_WINDOW: $_" }
-                  [System.Windows.Forms.SendKeys]::Send('{ESC}')
-                }
-              } catch {
-                Write-Host "PL9_INTERACTIVE_MENU_PROBE_ERROR=$($_.Exception.Message)"
-              }
+              # Qt custom widgets use a single native window by default.
+              # Read-only GUI inspection after native child HWND exposure.
+              Write-Host "PL9_QT_NATIVE_WINDOWS=$env:QT_USE_NATIVE_WINDOWS"
+              Write-Host "PL9_SESSION_APP=$($proc.SessionId) RUNNER=$([System.Diagnostics.Process]::GetCurrentProcess().SessionId)"
+              Write-Host "PL9_GUI_WINDOW_HANDLE=$($result.window_handle) UIA_TREE_OBSERVATION_ONLY=true"
             }
           } catch {
             $result.error=$_.Exception.Message
