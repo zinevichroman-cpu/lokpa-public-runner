@@ -1,0 +1,145 @@
+name: PL9 - Public Windows runner (private source)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/pl9-public-windows-launch.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  pl9:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Obtain private PL9 release files without publishing binaries
+        env:
+          GH_TOKEN: ${{ secrets.LOKPA_PRIVATE_REPO_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:GH_TOKEN) { throw 'LOKPA_PRIVATE_REPO_TOKEN is not configured on the public runner.' }
+          $dest = Join-Path $env:RUNNER_TEMP 'pl9-parts'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          gh release download pl9-package-v1 -R zinevichroman-cpu/lokpa-original-test -D $dest --pattern 'Parasharas_Light_9_RU.zip.*'
+          $lengths = @(73400320,73400320,73400320,73400320,25512863)
+          foreach ($i in 1..5) {
+            $file = Join-Path $dest ('Parasharas_Light_9_RU.zip.{0:000}' -f $i)
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "PL9 release part missing: $i" }
+            $len = (Get-Item -LiteralPath $file).Length
+            if ($len -ne $lengths[$i-1]) { throw "PL9 part $i size mismatch: $len" }
+          }
+          "PL9_PARTS=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host 'PL9 5 private release parts downloaded and length-verified.'
+
+      - name: Assemble archive and verify SHA256
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'Parasharas_Light_9_RU_JOINED.zip'
+          $writer = [System.IO.File]::Create($archive)
+          try {
+            foreach ($i in 1..5) {
+              $path = Join-Path $env:PL9_PARTS ('Parasharas_Light_9_RU.zip.{0:000}' -f $i)
+              $reader = [System.IO.File]::OpenRead($path)
+              try { $reader.CopyTo($writer) } finally { $reader.Dispose() }
+            }
+          } finally { $writer.Dispose() }
+          $size = (Get-Item -LiteralPath $archive).Length
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($size -ne 319114143 -or $hash -ne '4483ae94c87dcc73e332b2bffd2874b56548a28c077dc16b3269745e5f1e7ce4') { throw "PL9 ZIP integrity failure: size=$size hash=$hash" }
+          Write-Host "PL9 ZIP integrity pass: $size bytes, SHA256 $hash"
+          "PL9_ZIP=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Extract and verify PL9.exe
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = Join-Path $env:RUNNER_TEMP 'pl9-unpacked'
+          Expand-Archive -LiteralPath $env:PL9_ZIP -DestinationPath $dest -Force
+          $exe = Join-Path $dest 'GeoVision\PL9\PL9.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'PL9.exe not found in original layout.' }
+          $size=(Get-Item -LiteralPath $exe).Length
+          $hash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($size -ne 17408000 -or $hash -ne '8868694b4711434b05eb02a341efc770ab2850c417276a282b7673881a5be367') { throw "PL9.exe hash/size failure: $size $hash" }
+          $sign=(Get-AuthenticodeSignature -LiteralPath $exe).Status
+          Write-Host "PL9 executable verified: size=$size SHA256=$hash Authenticode=$sign"
+          "PL9_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Launch real PL9.exe on Windows and inspect top-level window and Win32 controls
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $code = @'
+          using System;
+          using System.Text;
+          using System.Collections.Generic;
+          using System.Runtime.InteropServices;
+          public class Pl9WindowsProbe {
+            public delegate bool WindowEnumerator(IntPtr hwnd, IntPtr lparam);
+            [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hwnd, WindowEnumerator cb, IntPtr p);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassNameW(IntPtr hwnd, StringBuilder b, int max);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr hwnd, StringBuilder b, int max);
+            [DllImport("user32.dll")] public static extern IntPtr GetMenu(IntPtr hwnd);
+            [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr menu);
+            public static string Info(IntPtr hwnd) {
+              var a=new StringBuilder(256); var b=new StringBuilder(256);
+              GetClassNameW(hwnd,a,a.Capacity); GetWindowTextW(hwnd,b,b.Capacity);
+              return "class="+a.ToString()+" text="+b.ToString();
+            }
+          }
+          '@
+          Add-Type -TypeDefinition $code -ErrorAction Stop
+          $exe=$env:PL9_EXE
+          $wd=Split-Path -Parent $exe
+          $proc=$null
+          $result=[ordered]@{ engine='Parasharas Light 9'; executable_verified=$true; process_started=$false; process_alive_after_15s=$false; process_id=$null; window_handle=$null; window_title=$null; window_class=$null; child_count=0; root_menu_present=$false; root_menu_items=0; calculations_verified=$false; export_verified=$false; error=$null }
+          try {
+            $proc=Start-Process -FilePath $exe -WorkingDirectory $wd -PassThru -ErrorAction Stop
+            $result.process_started=$true
+            $result.process_id=$proc.Id
+            Start-Sleep -Seconds 15
+            $proc.Refresh()
+            $result.process_alive_after_15s= -not $proc.HasExited
+            if (-not $result.process_alive_after_15s) { throw "PL9.exe exited before 15 seconds; exit=$($proc.ExitCode)" }
+            $handle=$proc.MainWindowHandle
+            $result.window_handle="0x"+$handle.ToInt64().ToString('X')
+            $result.window_title=$proc.MainWindowTitle
+            Write-Host "PL9 started=True alive_after_15s=True PID=$($proc.Id) HWND=$($result.window_handle) Title=$($result.window_title)"
+            if ($handle -ne [IntPtr]::Zero) {
+              $result.window_class=[Pl9WindowsProbe]::Info($handle)
+              $kids=New-Object 'System.Collections.Generic.List[string]'
+              $cb=[Pl9WindowsProbe+WindowEnumerator] { param($h,$unused) if($kids.Count -lt 80){$kids.Add([Pl9WindowsProbe]::Info($h))}; return $true }
+              [Pl9WindowsProbe]::EnumChildWindows($handle,$cb,[IntPtr]::Zero) | Out-Null
+              $result.child_count=$kids.Count
+              Write-Host "TOP_WINDOW=$($result.window_class)"
+              Write-Host "WIN32_CHILD_COUNT_AT_LEAST=$($kids.Count)"
+              $kids | ForEach-Object { Write-Host "CHILD: $_" }
+              $menu=[Pl9WindowsProbe]::GetMenu($handle)
+              $result.root_menu_present=($menu -ne [IntPtr]::Zero)
+              if($result.root_menu_present){$result.root_menu_items=[Pl9WindowsProbe]::GetMenuItemCount($menu)}
+              Write-Host "WIN32_ROOT_MENU=$($result.root_menu_present) ITEMS=$($result.root_menu_items)"
+            }
+          } catch {
+            $result.error=$_.Exception.Message
+            Write-Host "PL9_LAUNCH_ERROR=$($result.error)"
+            throw
+          } finally {
+            $result | ConvertTo-Json -Depth 4 | Write-Host
+            @(
+              '### PL9 — public Windows runner, private binaries not published',
+              '',
+              '| Check | Observed |',
+              '|---|---|',
+              "| SHA256 executable | verified |",
+              "| Start-Process succeeded | $($result.process_started) |",
+              "| Process alive after 15s | $($result.process_alive_after_15s) |",
+              "| Top-level HWND | $($result.window_handle) |",
+              "| Child HWND count (capped at 80) | $($result.child_count) |",
+              "| Win32 root menu exists | $($result.root_menu_present) |",
+              "| Natal calculations | NOT CALCULATED |",
+              "| Transit/Vimshottari | NOT CALCULATED |"
+            ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            if ($null -ne $proc) { $proc.Refresh(); if(-not $proc.HasExited){Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue} }
+          }
