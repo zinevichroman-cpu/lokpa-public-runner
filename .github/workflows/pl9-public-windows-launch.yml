@@ -25,7 +25,15 @@ jobs:
           if (-not $env:GH_TOKEN) { throw 'LOKPA_PRIVATE_REPO_TOKEN is not configured on the public runner.' }
           $dest = Join-Path $env:RUNNER_TEMP 'pl9-parts'
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          gh release download pl9-package-v1 -R zinevichroman-cpu/lokpa-original-test -D $dest --pattern 'Parasharas_Light_9_RU.zip.*'
+          $downloadOk = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            gh release download pl9-package-v1 -R zinevichroman-cpu/lokpa-original-test -D $dest --pattern 'Parasharas_Light_9_RU.zip.*' --clobber
+            $downloadExit = $LASTEXITCODE
+            if ($downloadExit -eq 0) { $downloadOk = $true; break }
+            Write-Host "PL9_RELEASE_DOWNLOAD_RETRY=$attempt EXIT=$downloadExit"
+            if ($attempt -lt 3) { Start-Sleep -Seconds 4 }
+          }
+          if (-not $downloadOk) { throw 'PL9 private release download failed after three attempts.' }
           $lengths = @(73400320,73400320,73400320,73400320,25512863)
           foreach ($i in 1..5) {
             $file = Join-Path $dest ('Parasharas_Light_9_RU.zip.{0:000}' -f $i)
