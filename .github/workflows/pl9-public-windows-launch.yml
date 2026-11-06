@@ -321,9 +321,11 @@ jobs:
                       $bytes=$stream.ToArray()
                       $b64=[Convert]::ToBase64String($bytes)
                       Write-Host "PL9_SCREENSHOT_BYTES=$($bytes.Length) WIDTH=$width HEIGHT=$height"
-                      for($offset=0,$chunk=0;$offset -lt $b64.Length;$offset+=3000,$chunk++){
+                      $chunk=0
+                      for($offset=0;$offset -lt $b64.Length;$offset+=3000){
                         $count=[Math]::Min(3000,$b64.Length-$offset)
                         Write-Host "PL9_SCREENSHOT_B64[$chunk]=$($b64.Substring($offset,$count))"
+                        $chunk++
                       }
                     } finally {
                       $stream.Dispose(); $graphics.Dispose(); $bitmap.Dispose()
