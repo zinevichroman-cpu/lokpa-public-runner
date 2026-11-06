@@ -122,5 +122,79 @@ class PL9ApiContractTests(unittest.TestCase):
             self.assertEqual(row["ascendant_longitude"], "33")
 
 
+    def test_exact_pl9_export_row_match_is_required_for_calculation_verification(self):
+        fields = [
+            "Example Native", "0", "1", "Test City", "Test Region", "Test Country",
+            "01:01:2000", "12:00:00", "2451545.0", "0", "0", "0", "0",
+        ] + [str(i) for i in range(14, 34)]
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "birthdat.txt"
+            path.write_text("\t".join(fields) + "\n", encoding="utf-8")
+            exported = pl9_api.parse_birth_data_export(path)
+            matched = pl9_api.match_birth_data_export_row(exported, self.birth)
+            self.assertIsNotNone(matched)
+            self.assertTrue(matched["matched_input"])
+            self.assertTrue(all(matched["verification"].values()))
+            self.assertEqual(matched["ascendant_longitude"], "33")
+            self.assertEqual(len(matched["auxiliary_points_raw_fields_23_to_29"]), 7)
+            self.assertEqual(matched["outer_planet_longitudes"]["Uranus"], "30")
+            self.assertEqual(matched["outer_planet_longitudes"]["Pluto"], "32")
+            self.assertIsNone(pl9_api.match_birth_data_export_row(
+                exported, dict(self.birth, longitude_east_deg=1)
+            ))
+
+    def test_calculate_endpoint_records_only_controller_verified_result(self):
+        class FakeController:
+            def health(self):
+                return {"service": "test", "calculation_verified": False}
+            def calculate_chart(self, chart_path, display_name, birth):
+                return {"status": "CALCULATION_VERIFIED", "calculation_verified": True,
+                        "test_fake": True, "display_name": display_name}
+            def open_chart(self, chart_path, display_name):
+                return {"status": "CHART_OPEN_CONFIRMED", "calculation_verified": False}
+            def trigger_birth_export(self, expected_birth=None):
+                return {"status": "EXPORT_FILE_CHANGED", "calculation_verified": False}
+            def select_menu(self, menu_path):
+                return {"status": "MENU_SELECTION_SENT", "menu_path": menu_path,
+                        "calculation_verified": False}
+        with tempfile.TemporaryDirectory() as td:
+            root_dir = Path(td)
+            config = pl9_api.Config(
+                exe=None, charts_dir=root_dir / "charts", export_dir=root_dir / "export",
+                host="127.0.0.1", port=0, api_key="test-key",
+            )
+            server = pl9_api.make_server(config)
+            server.RequestHandlerClass.controller = FakeController()
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                url = f"http://127.0.0.1:{server.server_address[1]}/horoscope"
+                payload = json.dumps({"birth": self.birth, "open": True, "calculate": True}).encode()
+                request = urllib.request.Request(
+                    url, data=payload, method="POST",
+                    headers={"Content-Type": "application/json", "X-API-Key": "test-key"},
+                )
+                with urllib.request.urlopen(request, timeout=3) as response:
+                    result = json.loads(response.read())
+                    self.assertEqual(response.status, 200)
+                self.assertTrue(result["calculation_verified"])
+                chart_id = result["chart_id"]
+                metadata = config.export_dir / ".pl9_api" / f"{chart_id}.json"
+                self.assertTrue(metadata.is_file())
+                saved = json.loads(metadata.read_text(encoding="utf-8"))
+                self.assertTrue(saved["calculation_verified"])
+                get_request = urllib.request.Request(
+                    f"http://127.0.0.1:{server.server_address[1]}/charts/{chart_id}",
+                    headers={"X-API-Key": "test-key"},
+                )
+                with urllib.request.urlopen(get_request, timeout=3) as response:
+                    status = json.loads(response.read())
+                self.assertTrue(status["calculation_verified"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+
 if __name__ == "__main__":
     unittest.main()
