@@ -529,4 +529,4 @@ jobs:
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
-# Manual PL9 native chart calculation and Vimshottari check requested 2026-11-07.
+# Retry PL9 native calculation after fixing Qt popup vs Open dialog handling.
