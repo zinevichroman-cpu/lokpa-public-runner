@@ -350,10 +350,8 @@ jobs:
                 Start-Sleep -Milliseconds 200
                 $timeInput=[Pl9WindowsProbe]::ReplaceWithSyntheticTime()
                 Write-Host "PL9_SYNTHETIC_TIME_CLICK_EVENTS=$timeClicked INPUT_EVENTS=$timeInput"
-                Start-Sleep -Milliseconds 300
-                $submit=[Pl9WindowsProbe]::SendEnter()
-                Write-Host "PL9_TEST_CHART_SUBMIT_ENTER_COUNT=$submit"
-                Start-Sleep -Seconds 2
+                Start-Sleep -Milliseconds 500
+                Write-Host "PL9_SYNTHETIC_TIME_PRE_SUBMIT_SCREENSHOT=True"
                 $ownedHandles=New-Object 'System.Collections.Generic.List[System.IntPtr]'
                 $ownedInfo=New-Object 'System.Collections.Generic.List[string]'
                 $ownedCb=[Pl9WindowsProbe+WindowEnumerator] {
