@@ -1,0 +1,34 @@
+name: PL9 Local API - contract tests
+
+on:
+  push:
+    paths:
+      - 'pl9-api/**'
+      - '.github/workflows/pl9-api-contract-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pl9-api-contract-tests
+  cancel-in-progress: true
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compile API and run contract tests
+        working-directory: pl9-api
+        run: |
+          python -m compileall -q .
+          python -m unittest -v
