@@ -612,7 +612,7 @@ class PL9RequestHandler(BaseHTTPRequestHandler):
                 metadata_dir.mkdir(parents=True, exist_ok=True)
                 metadata_path = metadata_dir / f"{chart_id}.json"
                 metadata = {
-                    "chart_id": chart_id, "birth": birth, "status": "NATIVE_PL9_XML_CREATED",
+                    "chart_id": chart_id, "birth": birth, "status": "NATIVE_PL9_XML_PRESENT",
                     "calculation_verified": False,
                     "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
                 }
