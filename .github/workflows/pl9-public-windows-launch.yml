@@ -529,3 +529,4 @@ jobs:
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
+# Manual PL9 calculation run requested 2026-11-06; execution logic unchanged.
