@@ -473,6 +473,8 @@ jobs:
           $env:PL9_CHARTS_DIR = Join-Path $geoVision 'GeovisionCharts'
           $env:PL9_EXPORT_DIR = Join-Path (Split-Path -Parent $env:PL9_EXE) 'Export'
           $env:PL9_API_PORT = '10810'
+          $env:QT_ACCESSIBILITY = '1'
+          $env:QT_USE_NATIVE_WINDOWS = '1'
           $env:PL9_API_KEY = 'pl9-smoke-' + [guid]::NewGuid().ToString('N')
           $stdout = Join-Path $env:RUNNER_TEMP 'pl9-api.stdout.log'
           $stderr = Join-Path $env:RUNNER_TEMP 'pl9-api.stderr.log'
@@ -591,22 +593,13 @@ jobs:
               if ($top.Current.ProcessId -eq $pl9Process.Id -and $top.Current.Name -eq 'User defined printout') { $printout = $top; break }
             }
             if ($null -ne $printout) {
-              $handle = [IntPtr]$printout.Current.NativeWindowHandle
-              if ($handle -ne [IntPtr]::Zero) {
-                Add-Type -TypeDefinition @'
-            using System;
-            using System.Runtime.InteropServices;
-            public static class PL9DiagInput {
-              [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-              [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
-            }
-            '@ -ErrorAction SilentlyContinue
-                [PL9DiagInput]::SetForegroundWindow($handle) | Out-Null
-                Start-Sleep -Milliseconds 200
-                [PL9DiagInput]::keybd_event(0x1B,0,0,[UIntPtr]::Zero)
-                [PL9DiagInput]::keybd_event(0x1B,0,2,[UIntPtr]::Zero)
+              try {
+                $windowPattern = $printout.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+                $windowPattern.Close()
                 Start-Sleep -Seconds 2
-                Write-Host 'PL9_PRINT_DIALOG_ESCAPE_SENT=true'
+                Write-Host 'PL9_PRINT_DIALOG_CLOSED=true'
+              } catch {
+                Write-Host "PL9_PRINT_DIALOG_CLOSE_ERROR=$($_.Exception.Message)"
               }
             }
             $desktopRoot = [System.Windows.Automation.AutomationElement]::RootElement
