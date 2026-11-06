@@ -584,4 +584,4 @@ jobs:
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
-# PL9 diagnostic run: capture UI even when export verification fails.
+# PL9 run: corrected menu-bar offset for Research export and Reports Dashas.
