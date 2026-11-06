@@ -420,19 +420,25 @@ class PL9Controller:
             win.set_focus()
             # Alt+F then O is the native File > Open command.
             win.type_keys("%fo", set_foreground=True)
-            time.sleep(1.0)
-            dialogs = self._other_windows(pid, win.handle)
-            dialog = next(
-                (w for w in dialogs if any(
-                    token in w.window_text().casefold()
-                    for token in ("open", "file manager", "chart", "открыть")
-                )),
-                None,
-            )
-            # PL9's Qt Open Chart dialog can expose only the generic title "PL9".
-            # If exactly one new top-level window appeared, treat it as the dialog.
-            if dialog is None and len(dialogs) == 1:
-                dialog = dialogs[0]
+            dialog = None
+            dialogs = []
+            deadline = time.time() + 12
+            while time.time() < deadline:
+                dialogs = self._other_windows(pid, win.handle)
+                dialog = next(
+                    (w for w in dialogs if any(
+                        token in w.window_text().casefold()
+                        for token in ("open", "file manager", "chart", "открыть")
+                    )),
+                    None,
+                )
+                # PL9's Qt Open Chart dialog can expose only the generic title "PL9".
+                # If exactly one new top-level window appeared, treat it as the dialog.
+                if dialog is None and len(dialogs) == 1:
+                    dialog = dialogs[0]
+                if dialog is not None:
+                    break
+                time.sleep(0.25)
             if dialog is None:
                 return {
                     "status": "OPEN_DIALOG_NOT_DETECTED",
@@ -457,12 +463,12 @@ class PL9Controller:
                 except Exception:
                     continue
             if edit_controls:
-                edit_controls[-1].set_edit_text(chart_path.name)
+                edit_controls[-1].set_edit_text(str(chart_path))
                 edit_controls[-1].type_keys("{ENTER}")
             else:
                 if list_controls:
                     list_controls[0].set_focus()
-                dialog.type_keys(chart_path.stem, with_spaces=True)
+                dialog.type_keys(str(chart_path), with_spaces=True)
                 time.sleep(0.35)
                 dialog.type_keys("{ENTER}")
             time.sleep(1.5)
@@ -501,16 +507,16 @@ class PL9Controller:
                     "export_file": str(export_file),
                     "calculation_verified": False,
                 }
-            # PL9 manual: Research menu order is Search for Charts, Statistics,
-            # Export Ephemeris, Export Birth Chart. The fourth entry is selected.
             # PL9's Qt menu bar is not exposed as a Win32 HMENU.
-            # Alt+F is confirmed by the Windows probe; Research is the 10th
-            # top-level menu after File (nine Right steps). Its documented
-            # fourth item is Export Birth Chart.
+            # Visible order from the native PL9 window is:
+            # File, Edit, Charts, Reports, Classical references, Options,
+            # Tools, Print, Research, Windows, Help.
+            # From the open File menu, Research is eight Right moves away.
+            # Its fourth item is Export Birth Chart.
             win.set_focus()
             win.type_keys("%f", set_foreground=True)
             time.sleep(0.2)
-            win.type_keys("{RIGHT 9}{DOWN}{DOWN 3}{ENTER}")
+            win.type_keys("{RIGHT 8}{DOWN 4}{ENTER}")
             deadline = time.time() + 25
             while time.time() < deadline:
                 if export_file.exists():
