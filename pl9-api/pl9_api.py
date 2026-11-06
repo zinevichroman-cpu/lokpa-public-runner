@@ -346,7 +346,8 @@ class PL9Controller:
         if win is not None:
             pid = win.process_id()
             app.connect(process=pid, timeout=10)
-            win.wait("visible", timeout=30)
+            # Desktop.windows(visible_only=True) already returns visible wrappers.
+            # pywinauto DialogWrapper has no wait() method.
             win.set_focus()
             return app, win
 
@@ -375,7 +376,8 @@ class PL9Controller:
                     app.connect(process=pid, timeout=10)
                 except Exception:
                     pass
-                win.wait("visible", timeout=30)
+                # Desktop.windows(visible_only=True) already returns visible wrappers.
+                # pywinauto DialogWrapper has no wait() method.
                 win.set_focus()
                 return app, win
             time.sleep(0.5)
