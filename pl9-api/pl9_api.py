@@ -418,22 +418,30 @@ class PL9Controller:
                     "calculation_verified": False,
                 }
             win.set_focus()
-            # Use separate native key events: Alt+F, choose Open, then activate.
-            # A single "%fo" sequence previously left a Qt popup menu open.
+            # File menu order begins New, Open. Use explicit menu navigation;
+            # Qt's access-key sequence left a popup instead of opening the dialog.
             win.type_keys("%f", set_foreground=True)
             time.sleep(0.25)
-            win.type_keys("o")
-            time.sleep(0.25)
-            win.type_keys("{ENTER}")
+            win.type_keys("{DOWN 2}{ENTER}")
             dialog = None
             dialogs = []
             deadline = time.time() + 12
             popup_classes = {"qt5qwindowpopupdropshadowsavebits", "qt5qwindowtool"}
             while time.time() < deadline:
-                dialogs = [
-                    w for w in self._other_windows(pid, win.handle)
-                    if w.class_name().casefold() not in popup_classes
-                ]
+                candidates = self._other_windows(pid, win.handle)
+                dialogs = []
+                for candidate in candidates:
+                    try:
+                        candidate_pid = candidate.process_id()
+                        candidate_class = candidate.class_name().casefold()
+                        candidate_title = candidate.window_text().casefold()
+                        if candidate_pid != pid or candidate_class in popup_classes:
+                            continue
+                        if not candidate_class and not candidate_title:
+                            continue
+                        dialogs.append(candidate)
+                    except Exception:
+                        continue
                 dialog = next(
                     (w for w in dialogs if any(
                         token in w.window_text().casefold()
@@ -441,8 +449,7 @@ class PL9Controller:
                     )),
                     None,
                 )
-                # PL9's Qt Open Chart dialog can expose only the generic title "PL9".
-                # Accept one non-menu Qt window as the generic file dialog.
+                # The Qt file dialog may have the generic title "PL9".
                 if dialog is None and len(dialogs) == 1:
                     dialog = dialogs[0]
                 if dialog is not None:
@@ -475,10 +482,12 @@ class PL9Controller:
                 edit_controls[-1].set_edit_text(str(chart_path))
                 edit_controls[-1].type_keys("{ENTER}")
             else:
-                if list_controls:
-                    list_controls[0].set_focus()
+                # Qt's native file picker supports Ctrl+L to focus the location field.
+                dialog.set_focus()
+                dialog.type_keys("^l")
+                time.sleep(0.2)
                 dialog.type_keys(str(chart_path), with_spaces=True)
-                time.sleep(0.35)
+                time.sleep(0.2)
                 dialog.type_keys("{ENTER}")
             time.sleep(1.5)
             title = win.window_text()
