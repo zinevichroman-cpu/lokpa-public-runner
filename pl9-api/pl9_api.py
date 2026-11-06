@@ -173,6 +173,62 @@ def parse_birth_data_export(path: Path) -> dict[str, Any]:
         ),
     }
 
+def match_birth_data_export_row(export: dict[str, Any], birth: dict[str, Any]) -> dict[str, Any] | None:
+    """Return only the PL9 export row matching every submitted birth-data field.
+
+    This is the gate that permits calculation_verified=True. The PL9 sample
+    export has 33 fields; ambiguous auxiliary fields remain as parsed by the
+    existing parser and are not re-labelled here.
+    """
+    name = _required_text(birth, "name", 120)
+    birth_date = dt.date.fromisoformat(_required_text(birth, "date", 10)).strftime("%d:%m:%Y")
+    time_text = _required_text(birth, "time", 8)
+    try:
+        parsed_time = dt.time.fromisoformat(time_text)
+    except ValueError as exc:
+        raise RequestError("time must be HH:MM[:SS]") from exc
+    birth_time = parsed_time.strftime("%H:%M:%S")
+    local_dt = dt.datetime.combine(dt.date.fromisoformat(_required_text(birth, "date", 10)), parsed_time)
+    expected_gender = {"male": "0", "female": "1", 0: "0", 1: "1"}.get(birth.get("gender", "male"))
+    expected_anka = str(birth.get("anka", 1))
+    expected_text = {
+        "name": name, "birth_date": birth_date, "birth_time": birth_time,
+        "city": _required_text(birth, "city", 120),
+        "country": _required_text(birth, "country", 120),
+    }
+    if str(birth.get("state", "")).strip():
+        expected_text["state"] = str(birth["state"]).strip()
+    expected_numbers = {
+        "birth_julian_day_local": julian_day_local(local_dt),
+        "timezone_pl9": -float(birth["utc_offset_hours"]),
+        "dst_hours": float(birth.get("dst_hours", 0)),
+        "longitude_pl9": -float(birth["longitude_east_deg"]),
+        "latitude_pl9": float(birth["latitude_north_deg"]),
+    }
+    for row in export.get("rows", []):
+        if any(str(row.get(key, "")).strip().casefold() != value.casefold()
+               for key, value in expected_text.items()):
+            continue
+        if expected_gender is not None and str(row.get("gender", "")).strip() != expected_gender:
+            continue
+        if str(row.get("anka", "")).strip() != expected_anka:
+            continue
+        try:
+            if any(abs(float(row[key]) - value) > 1e-6 for key, value in expected_numbers.items()):
+                continue
+        except (KeyError, TypeError, ValueError):
+            continue
+        return {
+            **row,
+            "matched_input": True,
+            "verification": {
+                "identity": True, "date_time": True, "city_region_country": True,
+                "timezone_dst": True, "coordinates": True, "julian_day": True,
+            },
+        }
+    return None
+
+
 def parse_ephemeris_export(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"PL9 ephemeris export not found: {path}")
@@ -342,7 +398,7 @@ class PL9Controller:
                 "status": "OPEN_FAILED", "process_id": pid, "chart_file": str(chart_path),
                 "error": str(exc), "calculation_verified": False,
             }
-    def trigger_birth_export(self) -> dict[str, Any]:
+    def trigger_birth_export(self, expected_birth: dict[str, Any] | None = None) -> dict[str, Any]:
         export_file = self.config.export_dir / "birthdat.txt"
         before_mtime = export_file.stat().st_mtime_ns if export_file.exists() else None
         before_hash = hashlib.sha256(export_file.read_bytes()).hexdigest() if export_file.exists() else None
@@ -357,24 +413,49 @@ class PL9Controller:
                     "export_file": str(export_file),
                     "calculation_verified": False,
                 }
-            # Manual menu order: Research -> Search for Charts, Statistics,
-            # Export Ephemeris, Export Birth Chart. Select the fourth item.
+            # PL9 manual: Research menu order is Search for Charts, Statistics,
+            # Export Ephemeris, Export Birth Chart. The fourth entry is selected.
             win.set_focus()
             win.type_keys("%r", set_foreground=True)
             time.sleep(0.25)
             win.type_keys("{DOWN 3}{ENTER}")
-            deadline = time.time() + 20
+            deadline = time.time() + 25
             while time.time() < deadline:
                 if export_file.exists():
                     stat = export_file.stat()
                     current_hash = hashlib.sha256(export_file.read_bytes()).hexdigest()
                     changed = before_mtime is None or stat.st_mtime_ns != before_mtime or current_hash != before_hash
                     if changed:
+                        exported = parse_birth_data_export(export_file)
+                        if expected_birth is None:
+                            return {
+                                "status": "EXPORT_FILE_CHANGED",
+                                "export": exported,
+                                "pl9_export_generated": True,
+                                "calculation_verified": False,
+                                "verification": "Fresh PL9 export detected; no specific chart was supplied for identity matching.",
+                            }
+                        matched = match_birth_data_export_row(exported, expected_birth)
+                        if matched is not None:
+                            return {
+                                "status": "CALCULATION_VERIFIED",
+                                "export": {
+                                    "source": exported["source"], "path": exported["path"],
+                                    "modified_utc": exported["modified_utc"],
+                                    "delimiter": exported["delimiter"],
+                                },
+                                "matched_chart": matched,
+                                "pl9_export_generated": True,
+                                "calculation_verified": True,
+                                "verification": "A fresh PL9 export row matches the submitted name, birth date/time, place, coordinates, timezone, DST and local Julian day.",
+                            }
                         return {
-                            "status": "EXPORT_FILE_CHANGED",
-                            "export": parse_birth_data_export(export_file),
-                            "pl9_export_generated": True, "calculation_verified": False,
-                            "verification": "PL9 birthdat.txt changed after the native export command; returned rows are the native export.",
+                            "status": "EXPORT_FILE_CHANGED_NO_EXACT_MATCH",
+                            "export_file": str(export_file),
+                            "export_row_count": len(exported.get("rows", [])),
+                            "pl9_export_generated": True,
+                            "calculation_verified": False,
+                            "verification": "The export changed, but no row matched every submitted birth-data field. No result is certified for this chart.",
                         }
                 time.sleep(0.5)
             return {
@@ -388,8 +469,50 @@ class PL9Controller:
                 "error": str(exc), "calculation_verified": False,
             }
 
+    def calculate_chart(self, chart_path: Path, display_name: str, expected_birth: dict[str, Any]) -> dict[str, Any]:
+        opened = self.open_chart(chart_path, display_name)
+        if opened.get("status") in {"OPEN_FAILED", "MODAL_DIALOG_BLOCKS_OPEN", "OPEN_DIALOG_NOT_DETECTED"}:
+            return {
+                "status": "CHART_OPEN_FAILED",
+                "open": opened,
+                "calculation_verified": False,
+            }
+        exported = self.trigger_birth_export(expected_birth)
+        verified = exported.get("calculation_verified") is True
+        return {
+            "status": "CALCULATION_VERIFIED" if verified else exported.get("status", "CALCULATION_NOT_VERIFIED"),
+            "open": opened,
+            "export": exported,
+            "calculation_verified": verified,
+        }
+
+    def select_menu(self, menu_path: str) -> dict[str, Any]:
+        parts = [part.strip() for part in menu_path.split("->")]
+        allowed_roots = {"Reports", "Research", "Charts", "Print", "Tools", "Interpretations", "Classical references"}
+        if len(parts) < 2 or len(parts) > 5 or parts[0] not in allowed_roots or any(not p for p in parts):
+            raise RequestError("menu_path must be a PL9 menu path beginning with Reports, Research, Charts, Print, Tools, Interpretations or Classical references")
+        app, win = self._connect_or_start()
+        win.set_focus()
+        try:
+            win.menu_select("->".join(parts))
+            time.sleep(0.35)
+            return {
+                "status": "MENU_SELECTION_SENT",
+                "menu_path": "->".join(parts),
+                "main_window": win.window_text(),
+                "visible_windows": [w.window_text() for w in self._other_windows(app.process, win.handle)],
+                "calculation_verified": False,
+            }
+        except Exception as exc:
+            return {
+                "status": "MENU_SELECTION_FAILED",
+                "menu_path": "->".join(parts),
+                "error": str(exc),
+                "calculation_verified": False,
+            }
+
 def _chart_id_from_path(path: str) -> str | None:
-    match = re.fullmatch(r"/charts/([0-9a-fA-F]{32})(?:/open)?", path)
+    match = re.fullmatch(r"/charts/([0-9a-fA-F]{32})(?:/(?:open|calculate))?", path)
     return match.group(1).lower() if match else None
 
 class PL9RequestHandler(BaseHTTPRequestHandler):
