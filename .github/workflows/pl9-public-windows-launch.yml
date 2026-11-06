@@ -529,4 +529,4 @@ jobs:
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
-# Manual PL9 calculation run requested 2026-11-06; execution logic unchanged.
+# Manual PL9 native chart calculation and Vimshottari check requested 2026-11-07.
