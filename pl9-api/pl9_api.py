@@ -403,6 +403,7 @@ class PL9Controller:
             return {"title": str(window)}
 
     def open_chart(self, chart_path: Path, display_name: str) -> dict[str, Any]:
+        from pywinauto import Desktop
         pid = None
         try:
             app, win = self._connect_or_start()
