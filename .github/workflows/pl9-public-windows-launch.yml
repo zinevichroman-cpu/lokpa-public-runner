@@ -83,6 +83,11 @@ jobs:
             [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr hwnd, StringBuilder b, int max);
             [DllImport("user32.dll")] public static extern IntPtr GetMenu(IntPtr hwnd);
             [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr menu);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+            [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll")] public static extern bool EnumWindows(WindowEnumerator cb, IntPtr p);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
             public static string Info(IntPtr hwnd) {
               var a=new StringBuilder(256); var b=new StringBuilder(256);
               GetClassNameW(hwnd,a,a.Capacity); GetWindowTextW(hwnd,b,b.Capacity);
@@ -120,6 +125,35 @@ jobs:
               $result.root_menu_present=($menu -ne [IntPtr]::Zero)
               if($result.root_menu_present){$result.root_menu_items=[Pl9WindowsProbe]::GetMenuItemCount($menu)}
               Write-Host "WIN32_ROOT_MENU=$($result.root_menu_present) ITEMS=$($result.root_menu_items)"
+              # Non-destructive focus/menu probe. ALT+F opens File menu only if an
+              # interactive desktop and Qt keyboard routing are actually working.
+              try {
+                Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+                $focusResult=[Pl9WindowsProbe]::SetForegroundWindow($handle)
+                Start-Sleep -Milliseconds 450
+                $active=[Pl9WindowsProbe]::GetForegroundWindow()
+                Write-Host "FOCUS_REQUEST_RESULT=$focusResult FOREGROUND_MATCH=$($active -eq $handle)"
+                if($active -eq $handle) {
+                  [System.Windows.Forms.SendKeys]::Send('%f')
+                  Start-Sleep -Milliseconds 900
+                  $popupList=New-Object 'System.Collections.Generic.List[string]'
+                  $enumCb=[Pl9WindowsProbe+WindowEnumerator] {
+                    param($window,$lparam)
+                    [uint32]$targetPid=0
+                    [Pl9WindowsProbe]::GetWindowThreadProcessId($window,[ref]$targetPid) | Out-Null
+                    if(($targetPid -eq $proc.Id) -and ([Pl9WindowsProbe]::IsWindowVisible($window))) {
+                      $popupList.Add([Pl9WindowsProbe]::Info($window))
+                    }
+                    return $true
+                  }
+                  [Pl9WindowsProbe]::EnumWindows($enumCb,[IntPtr]::Zero) | Out-Null
+                  Write-Host "PL9_VISIBLE_TOP_LEVEL_AFTER_ALT_F=$($popupList.Count)"
+                  $popupList | ForEach-Object { Write-Host "PL9_VISIBLE_WINDOW: $_" }
+                  [System.Windows.Forms.SendKeys]::Send('{ESC}')
+                }
+              } catch {
+                Write-Host "PL9_INTERACTIVE_MENU_PROBE_ERROR=$($_.Exception.Message)"
+              }
             }
           } catch {
             $result.error=$_.Exception.Message
