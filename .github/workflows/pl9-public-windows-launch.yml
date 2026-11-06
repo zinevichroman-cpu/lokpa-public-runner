@@ -98,6 +98,9 @@ jobs:
           Add-Type -TypeDefinition $code -ErrorAction Stop
           $exe=$env:PL9_EXE
           $wd=Split-Path -Parent $exe
+          # Qt can expose its native accessibility tree when explicitly enabled.
+          # This is inspection-only: no UI input and no user chart details in public logs.
+          $env:QT_ACCESSIBILITY = '1'
           $proc=$null
           $result=[ordered]@{ engine='Parasharas Light 9'; executable_verified=$true; process_started=$false; process_alive_after_15s=$false; process_id=$null; window_handle=$null; window_title=$null; window_class=$null; child_count=0; root_menu_present=$false; root_menu_items=0; calculations_verified=$false; export_verified=$false; error=$null }
           try {
@@ -119,6 +122,86 @@ jobs:
               [Pl9WindowsProbe]::EnumChildWindows($handle,$cb,[IntPtr]::Zero) | Out-Null
               $result.child_count=$kids.Count
               Write-Host "TOP_WINDOW=$($result.window_class)"
+              try {
+                Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+                Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+                if ($null -ne $root) {
+                  $nodes = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+                  Write-Host "PL9_QT_ACCESSIBILITY=$env:QT_ACCESSIBILITY UIA_DESCENDANTS=$($nodes.Count)"
+                  $allowed = '^(File|New|Open|Birth Data|Birth Details|Research|Export|Save|OK|Cancel|Edit|Chart|Charts|Dasha|Dasas|Vimshottari)
+              Write-Host "WIN32_CHILD_COUNT_AT_LEAST=$($kids.Count)"
+              $kids | ForEach-Object { Write-Host "CHILD: $_" }
+              $menu=[Pl9WindowsProbe]::GetMenu($handle)
+              $result.root_menu_present=($menu -ne [IntPtr]::Zero)
+              if($result.root_menu_present){$result.root_menu_items=[Pl9WindowsProbe]::GetMenuItemCount($menu)}
+              Write-Host "WIN32_ROOT_MENU=$($result.root_menu_present) ITEMS=$($result.root_menu_items)"
+              # Non-destructive focus/menu probe. ALT+F opens File menu only if an
+              # interactive desktop and Qt keyboard routing are actually working.
+              try {
+                Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+                $focusResult=[Pl9WindowsProbe]::SetForegroundWindow($handle)
+                Start-Sleep -Milliseconds 450
+                $active=[Pl9WindowsProbe]::GetForegroundWindow()
+                Write-Host "FOCUS_REQUEST_RESULT=$focusResult FOREGROUND_MATCH=$($active -eq $handle)"
+                if($active -eq $handle) {
+                  [System.Windows.Forms.SendKeys]::Send('%f')
+                  Start-Sleep -Milliseconds 900
+                  $popupList=New-Object 'System.Collections.Generic.List[string]'
+                  $enumCb=[Pl9WindowsProbe+WindowEnumerator] {
+                    param($window,$lparam)
+                    [uint32]$targetPid=0
+                    [Pl9WindowsProbe]::GetWindowThreadProcessId($window,[ref]$targetPid) | Out-Null
+                    if(($targetPid -eq $proc.Id) -and ([Pl9WindowsProbe]::IsWindowVisible($window))) {
+                      $popupList.Add([Pl9WindowsProbe]::Info($window))
+                    }
+                    return $true
+                  }
+                  [Pl9WindowsProbe]::EnumWindows($enumCb,[IntPtr]::Zero) | Out-Null
+                  Write-Host "PL9_VISIBLE_TOP_LEVEL_AFTER_ALT_F=$($popupList.Count)"
+                  $popupList | ForEach-Object { Write-Host "PL9_VISIBLE_WINDOW: $_" }
+                  [System.Windows.Forms.SendKeys]::Send('{ESC}')
+                }
+              } catch {
+                Write-Host "PL9_INTERACTIVE_MENU_PROBE_ERROR=$($_.Exception.Message)"
+              }
+            }
+          } catch {
+            $result.error=$_.Exception.Message
+            Write-Host "PL9_LAUNCH_ERROR=$($result.error)"
+            throw
+          } finally {
+            $result | ConvertTo-Json -Depth 4 | Write-Host
+            @(
+              '### PL9 — public Windows runner, private binaries not published',
+              '',
+              '| Check | Observed |',
+              '|---|---|',
+              "| SHA256 executable | verified |",
+              "| Start-Process succeeded | $($result.process_started) |",
+              "| Process alive after 15s | $($result.process_alive_after_15s) |",
+              "| Top-level HWND | $($result.window_handle) |",
+              "| Child HWND count (capped at 80) | $($result.child_count) |",
+              "| Win32 root menu exists | $($result.root_menu_present) |",
+              "| Natal calculations | NOT CALCULATED |",
+              "| Transit/Vimshottari | NOT CALCULATED |"
+            ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            if ($null -ne $proc) { $proc.Refresh(); if(-not $proc.HasExited){Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue} }
+          }
+
+                  $k = 0
+                  foreach ($node in $nodes) {
+                    if($k -ge 25) { break }
+                    $name = $node.Current.Name
+                    if($name -match $allowed) {
+                      Write-Host "UIA_CMD: $name TYPE=$($node.Current.ControlType.ProgrammaticName)"
+                      $k++
+                    }
+                  }
+                }
+              } catch {
+                Write-Host "PL9_UIA_READ_ONLY_ERROR=$($_.Exception.Message)"
+              }
               Write-Host "WIN32_CHILD_COUNT_AT_LEAST=$($kids.Count)"
               $kids | ForEach-Object { Write-Host "CHILD: $_" }
               $menu=[Pl9WindowsProbe]::GetMenu($handle)
