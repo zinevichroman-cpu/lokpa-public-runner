@@ -1,0 +1,136 @@
+openapi: 3.1.0
+info:
+  title: Parashara's Light 9 Local API
+  version: 0.1.0
+  description: >
+    Localhost-only wrapper around an installed PL9 application. It creates
+    native BirthData XML and reads exports produced by PL9 itself. It is not
+    an independent astrology calculation engine.
+servers:
+  - url: http://127.0.0.1:10810
+security:
+  - ApiKeyAuth: []
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    BirthInput:
+      type: object
+      required:
+        - name
+        - gender
+        - date
+        - time
+        - utc_offset_hours
+        - longitude_east_deg
+        - latitude_north_deg
+        - city
+        - country
+      properties:
+        name: { type: string, maxLength: 120 }
+        gender: { type: string, enum: [male, female] }
+        date: { type: string, format: date, description: Local birth date YYYY-MM-DD }
+        time: { type: string, pattern: '^\d{2}:\d{2}(:\d{2})?$', description: Local civil time }
+        utc_offset_hours: { type: number, minimum: -14, maximum: 14, description: Standard UTC offset; east positive }
+        dst_hours: { type: number, minimum: 0, maximum: 3, default: 0 }
+        longitude_east_deg: { type: number, minimum: -180, maximum: 180, description: East positive, west negative }
+        latitude_north_deg: { type: number, minimum: -90, maximum: 90, description: North positive, south negative }
+        city: { type: string, maxLength: 120 }
+        state: { type: string, maxLength: 120 }
+        country: { type: string, maxLength: 120 }
+        anka: { type: integer, minimum: 1, maximum: 5, default: 1 }
+        rodden_rating: { type: integer, minimum: 0, maximum: 5, default: 0 }
+        bd_lookup_mode: { type: string, enum: [A, D, S], default: D }
+    ChartCreateRequest:
+      type: object
+      required: [birth]
+      properties:
+        birth: { $ref: '#/components/schemas/BirthInput' }
+        open: { type: boolean, default: true }
+paths:
+  /health:
+    get:
+      summary: Check local API and PL9 process
+      responses:
+        '200':
+          description: Runtime status; not proof of a calculation
+  /status:
+    get:
+      summary: LOKPA-style alias for /health
+      responses:
+        '200':
+          description: Runtime status
+  /version:
+    get:
+      summary: Identify the PL9 API wrapper version
+      responses:
+        '200':
+          description: API and engine identity
+  /horoscope:
+    post:
+      summary: LOKPA-style entry point; create native PL9 XML and request GUI open
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChartCreateRequest' }
+      responses:
+        '201':
+          description: XML file created; GUI open status is reported separately
+        '400':
+          description: Invalid birth input
+  /charts:
+    post:
+      summary: Alias for creating a native PL9 chart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChartCreateRequest' }
+      responses:
+        '201':
+          description: XML file created
+  /charts/{id}:
+    get:
+      summary: Check that the native XML file exists
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+      responses:
+        '200': { description: XML file present }
+        '404': { description: Chart not found }
+  /charts/{id}/open:
+    post:
+      summary: Request PL9 to open an existing native XML chart
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+      responses:
+        '200': { description: Open request result }
+        '404': { description: Chart not found }
+        '503': { description: GUI open failed }
+  /exports/birth-data/run:
+    post:
+      summary: Request native PL9 Research > Export Birth Chart
+      responses:
+        '200': { description: Export file changed and was parsed }
+        '202': { description: Export not confirmed; no calculation result claimed }
+  /exports/birth-data:
+    get:
+      summary: Read the latest native PL9 birth-data export
+      responses:
+        '200': { description: Parsed PL9 export rows with raw fields preserved }
+        '404': { description: Export file not found }
+  /exports/ephemeris:
+    get:
+      summary: Read PL9 Export/ephemeris.txt
+      responses:
+        '200': { description: Raw native ephemeris export }
+        '404': { description: Export file not found }
