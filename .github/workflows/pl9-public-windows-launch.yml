@@ -169,6 +169,24 @@ jobs:
               }
               return SendInput((uint)inputs.Count,inputs.ToArray(),Marshal.SizeOf(typeof(Pl9Input)));
             }
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+            public static uint ClickAt(int x,int y) {
+              if(!SetCursorPos(x,y)) return 0;
+              var down=new Pl9Input(); down.type=0; down.U.mi.dwFlags=2;
+              var up=new Pl9Input(); up.type=0; up.U.mi.dwFlags=4;
+              return SendInput(2,new Pl9Input[]{down,up},Marshal.SizeOf(typeof(Pl9Input)));
+            }
+            public static uint ReplaceWithSyntheticDate() {
+              var inputs=new List<Pl9Input>();
+              inputs.Add(KeyInput(0x11,0)); inputs.Add(KeyInput(0x41,0));
+              inputs.Add(KeyInput(0x41,2)); inputs.Add(KeyInput(0x11,2));
+              foreach(char ch in "1 Jan 2000") {
+                var press=new Pl9Input(); press.type=1; press.U.ki.wScan=(ushort)ch; press.U.ki.dwFlags=4;
+                var release=press; release.U.ki.dwFlags=6;
+                inputs.Add(press); inputs.Add(release);
+              }
+              return SendInput((uint)inputs.Count,inputs.ToArray(),Marshal.SizeOf(typeof(Pl9Input)));
+            }
             [DllImport("oleacc.dll", PreserveSig=true)]
             public static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint objectId, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out Pl9IAccessible accessible);
             [DllImport("user32.dll")] public static extern bool EnumWindows(WindowEnumerator cb, IntPtr p);
@@ -311,6 +329,12 @@ jobs:
                 $typed=[Pl9WindowsProbe]::SendTestName()
                 Write-Host "PL9_TEST_NAME_KEY_EVENTS=$typed"
                 Start-Sleep -Milliseconds 350
+                # Date field at (490,263) confirmed on Data Entry screenshot, synthetic date only.
+                $clicked=[Pl9WindowsProbe]::ClickAt(490,263)
+                Start-Sleep -Milliseconds 250
+                $dated=[Pl9WindowsProbe]::ReplaceWithSyntheticDate()
+                Write-Host "PL9_SYNTHETIC_DATE_CLICK_EVENTS=$clicked INPUT_EVENTS=$dated"
+                Start-Sleep -Milliseconds 300
                 $submit=[Pl9WindowsProbe]::SendEnter()
                 Write-Host "PL9_TEST_CHART_SUBMIT_ENTER_COUNT=$submit"
                 Start-Sleep -Seconds 2
