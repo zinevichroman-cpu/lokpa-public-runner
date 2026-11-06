@@ -568,6 +568,60 @@ jobs:
                 Write-Host "PL9_DASHA_MENU_ERROR=$($_.Exception.Message)"
               }
             }
+            # Inspect and clear the actual PL9 modal before trying any report action.
+            Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+            Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
+            $pl9Process = Get-Process -Name PL9 -ErrorAction Stop | Select-Object -First 1
+            $desktopRoot = [System.Windows.Automation.AutomationElement]::RootElement
+            $topWindows = $desktopRoot.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+            foreach ($top in $topWindows) {
+              if ($top.Current.ProcessId -eq $pl9Process.Id) {
+                Write-Host "PL9_UIA_TOP title=$($top.Current.Name) type=$($top.Current.ControlType.ProgrammaticName) class=$($top.Current.ClassName) hwnd=$($top.Current.NativeWindowHandle)"
+                $nodes = $top.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+                for ($j = 0; $j -lt [Math]::Min($nodes.Count, 100); $j++) {
+                  $el = $nodes.Item($j)
+                  $rect = $el.Current.BoundingRectangle
+                  Write-Host "PL9_UIA[$j] type=$($el.Current.ControlType.ProgrammaticName) name=$($el.Current.Name) id=$($el.Current.AutomationId) class=$($el.Current.ClassName) rect=$($rect.X),$($rect.Y),$($rect.Width),$($rect.Height)"
+                }
+              }
+            }
+            # Close only the known blocking printout dialog; do not confirm or print it.
+            $printout = $null
+            foreach ($top in $topWindows) {
+              if ($top.Current.ProcessId -eq $pl9Process.Id -and $top.Current.Name -eq 'User defined printout') { $printout = $top; break }
+            }
+            if ($null -ne $printout) {
+              $handle = [IntPtr]$printout.Current.NativeWindowHandle
+              if ($handle -ne [IntPtr]::Zero) {
+                Add-Type -TypeDefinition @'
+            using System;
+            using System.Runtime.InteropServices;
+            public static class PL9DiagInput {
+              [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+              [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+            }
+            '@ -ErrorAction SilentlyContinue
+                [PL9DiagInput]::SetForegroundWindow($handle) | Out-Null
+                Start-Sleep -Milliseconds 200
+                [PL9DiagInput]::keybd_event(0x1B,0,0,[UIntPtr]::Zero)
+                [PL9DiagInput]::keybd_event(0x1B,0,2,[UIntPtr]::Zero)
+                Start-Sleep -Seconds 2
+                Write-Host 'PL9_PRINT_DIALOG_ESCAPE_SENT=true'
+              }
+            }
+            $desktopRoot = [System.Windows.Automation.AutomationElement]::RootElement
+            $topWindows = $desktopRoot.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+            foreach ($top in $topWindows) {
+              if ($top.Current.ProcessId -eq $pl9Process.Id) {
+                Write-Host "PL9_UIA_AFTER_CLOSE title=$($top.Current.Name) type=$($top.Current.ControlType.ProgrammaticName) class=$($top.Current.ClassName)"
+                $nodes = $top.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+                for ($j = 0; $j -lt [Math]::Min($nodes.Count, 140); $j++) {
+                  $el = $nodes.Item($j)
+                  Write-Host "PL9_UIA_AFTER[$j] type=$($el.Current.ControlType.ProgrammaticName) name=$($el.Current.Name) id=$($el.Current.AutomationId) class=$($el.Current.ClassName)"
+                }
+              }
+            }
+            Write-Pl9ScreenSnapshot -Label 'AFTER_DIALOG_CLOSE'
             if (-not $result.calculation_verified) { throw 'PL9 API did not verify a matching native PL9 birth-data export.' }
             if (-not $result.operation.export.matched_chart) { throw 'Verified response did not include the matched PL9 export row.' }
             Write-Host 'PL9_API_REAL_CALCULATION_VERIFIED=true'
