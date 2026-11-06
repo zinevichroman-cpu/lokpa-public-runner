@@ -550,15 +550,27 @@ class PL9Controller:
                     "calculation_verified": False,
                 }
             # PL9's Qt menu bar is not exposed as a Win32 HMENU.
-            # Visible order from the native PL9 window is:
-            # File, Edit, Charts, Reports, Classical references, Options,
-            # Tools, Print, Research, Windows, Help.
-            # From the open File menu, Research is eight Right moves away.
-            # Its fourth item is Export Birth Chart.
-            win.set_focus()
-            win.type_keys("%f", set_foreground=True)
+            # Use native Win32 input: File -> Research -> Export Birth Chart.
+            import ctypes
+            user32 = ctypes.windll.user32
+            user32.ShowWindow(win.handle, 9)
+            user32.SetForegroundWindow(win.handle)
             time.sleep(0.2)
-            win.type_keys("{RIGHT 8}{DOWN 4}{ENTER}")
+            user32.keybd_event(0x12, 0, 0, 0)  # Alt down
+            user32.keybd_event(0x46, 0, 0, 0)  # F down
+            user32.keybd_event(0x46, 0, 0x0002, 0)
+            user32.keybd_event(0x12, 0, 0x0002, 0)  # Alt up
+            time.sleep(0.2)
+            for _ in range(8):
+                user32.keybd_event(0x27, 0, 0, 0)  # Right
+                user32.keybd_event(0x27, 0, 0x0002, 0)
+                time.sleep(0.03)
+            for _ in range(4):
+                user32.keybd_event(0x28, 0, 0, 0)  # Down
+                user32.keybd_event(0x28, 0, 0x0002, 0)
+                time.sleep(0.03)
+            user32.keybd_event(0x0D, 0, 0, 0)  # Enter
+            user32.keybd_event(0x0D, 0, 0x0002, 0)
             deadline = time.time() + 25
             while time.time() < deadline:
                 if export_file.exists():
@@ -638,23 +650,51 @@ class PL9Controller:
         }
         win.set_focus()
         try:
-            # Qt's menu bar has no Win32 HMENU (GetMenu returned NULL in the
-            # Windows probe). Navigate from the confirmed File hotkey instead.
-            win.type_keys("%f", set_foreground=True)
-            time.sleep(0.15)
+            # Native Win32 keyboard input is required for this Qt menu in the
+            # headless Windows runner; pywinauto type_keys did not activate it.
+            import ctypes
+            user32 = ctypes.windll.user32
+            user32.ShowWindow(win.handle, 9)
+            user32.SetForegroundWindow(win.handle)
+            time.sleep(0.2)
+            user32.keybd_event(0x12, 0, 0, 0)
+            user32.keybd_event(0x46, 0, 0, 0)
+            user32.keybd_event(0x46, 0, 0x0002, 0)
+            user32.keybd_event(0x12, 0, 0x0002, 0)
+            time.sleep(0.2)
             root_index = root_indexes[parts[0]]
-            if root_index:
-                win.type_keys(f"{{RIGHT {root_index}}}")
+            for _ in range(root_index):
+                user32.keybd_event(0x27, 0, 0, 0)
+                user32.keybd_event(0x27, 0, 0x0002, 0)
+                time.sleep(0.03)
             time.sleep(0.15)
-            win.type_keys("{DOWN}")
-            for segment in parts[1:]:
-                time.sleep(0.15)
-                if parts[0] == "Research" and segment == "Export Birth Chart":
-                    win.type_keys("{DOWN 3}")
-                else:
-                    win.type_keys(segment, with_spaces=True)
-                win.type_keys("{ENTER}")
-            time.sleep(0.35)
+            if parts[0] == "Reports" and parts[1] == "Dashas" and len(parts) >= 3 and parts[2] == "Vimshottari":
+                # Reports menu order: Horoscope, Calculations, Interpretations, Dashas.
+                for _ in range(4):
+                    user32.keybd_event(0x28, 0, 0, 0)
+                    user32.keybd_event(0x28, 0, 0x0002, 0)
+                    time.sleep(0.03)
+                user32.keybd_event(0x0D, 0, 0, 0)
+                user32.keybd_event(0x0D, 0, 0x0002, 0)
+                time.sleep(0.2)
+                # Vimshottari is the first dasha report in PL9's Dashas submenu.
+                user32.keybd_event(0x56, 0, 0, 0)
+                user32.keybd_event(0x56, 0, 0x0002, 0)
+                user32.keybd_event(0x0D, 0, 0, 0)
+                user32.keybd_event(0x0D, 0, 0x0002, 0)
+            else:
+                user32.keybd_event(0x28, 0, 0, 0)
+                user32.keybd_event(0x28, 0, 0x0002, 0)
+                for segment in parts[1:]:
+                    for ch in segment:
+                        vk = ord(ch.upper())
+                        user32.keybd_event(vk, 0, 0, 0)
+                        user32.keybd_event(vk, 0, 0x0002, 0)
+                        time.sleep(0.02)
+                    user32.keybd_event(0x0D, 0, 0, 0)
+                    user32.keybd_event(0x0D, 0, 0x0002, 0)
+                    time.sleep(0.15)
+            time.sleep(0.5)
             return {
                 "status": "MENU_INPUT_SENT_UNVERIFIED",
                 "menu_path": "->".join(parts),
