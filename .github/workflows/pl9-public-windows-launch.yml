@@ -721,7 +721,14 @@ jobs:
               [PL9MenuProbe]::Click(402,205)
               Start-Sleep -Seconds 1
               Write-Pl9ScreenSnapshot -Label 'REPORTS_INTERPRETATIONS_SUBMENU'
-              [PL9MenuProbe]::Click(574,276)
+              # Keyboard traversal avoids Qt submenu collapse observed in run 42331699060.
+              [System.Windows.Forms.SendKeys]::SendWait('{DOWN 4}')
+              Start-Sleep -Milliseconds 500
+              Write-Pl9ScreenSnapshot -Label 'DASHA_INTERPRETATIONS_SELECTED'
+              [System.Windows.Forms.SendKeys]::SendWait('{RIGHT}')
+              Start-Sleep -Milliseconds 600
+              Write-Pl9ScreenSnapshot -Label 'DASHA_THIRD_LEVEL_MENU'
+              [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
               Start-Sleep -Seconds 2
               Write-Pl9ScreenSnapshot -Label 'DASHA_REPORT_PERIOD_BEFORE'
               $desktopRoot = [System.Windows.Automation.AutomationElement]::RootElement
