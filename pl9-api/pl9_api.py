@@ -549,33 +549,29 @@ class PL9Controller:
                     "export_file": str(export_file),
                     "calculation_verified": False,
                 }
-            # PL9's Qt menu bar is not exposed as a Win32 HMENU.
-            # Use native Win32 input: File -> Research -> Export Birth Chart.
+            # The official PL9 9.0 manual (Feature48-1-ResearchTopMenu.png)
+            # shows Research > Export Birth Chart at the fourth dropdown item.
+            # The old Alt+F/right-arrow sequence opened User Defined Printout.
+            # Use coordinates relative to the actual PL9 window, not the desktop.
             import ctypes
             user32 = ctypes.windll.user32
+            bounds = win.rectangle()
             user32.ShowWindow(win.handle, 9)
+            win.set_focus()
             user32.SetForegroundWindow(win.handle)
-            time.sleep(0.2)
-            user32.keybd_event(0x12, 0, 0, 0)  # Alt down
-            user32.keybd_event(0x46, 0, 0, 0)  # F down
-            user32.keybd_event(0x46, 0, 0x0002, 0)
-            user32.keybd_event(0x12, 0, 0x0002, 0)  # Alt up
-            time.sleep(0.2)
-            # Alt+F leaves the File dropdown active; the first Right
-            # closes that dropdown before moving across the menu bar.
-            for _ in range(9):
-                user32.keybd_event(0x27, 0, 0, 0)  # Right to Research
-                user32.keybd_event(0x27, 0, 0x0002, 0)
-                time.sleep(0.03)
-            # Both "Export Ephemeris" and "Export Birth Chart" start with E.
-            # Type E to focus the first, then Down once to the second.
-            user32.keybd_event(0x45, 0, 0, 0)  # E
-            user32.keybd_event(0x45, 0, 0x0002, 0)
-            time.sleep(0.1)
-            user32.keybd_event(0x28, 0, 0, 0)  # Down to Export Birth Chart
-            user32.keybd_event(0x28, 0, 0x0002, 0)
-            user32.keybd_event(0x0D, 0, 0, 0)  # Enter
-            user32.keybd_event(0x0D, 0, 0x0002, 0)
+            time.sleep(0.4)
+            def click_at(x: int, y: int) -> None:
+                if not user32.SetCursorPos(x, y):
+                    raise RuntimeError("SetCursorPos failed during native PL9 export")
+                time.sleep(0.18)
+                user32.mouse_event(0x0002, 0, 0, 0, 0)
+                time.sleep(0.10)
+                user32.mouse_event(0x0004, 0, 0, 0, 0)
+            # PL9 screenshot reference: menu bar 43 px below window top;
+            # Export Birth Chart 101 px below Research's menu-bar label.
+            click_at(bounds.left + 543, bounds.top + 43)
+            time.sleep(0.4)
+            click_at(bounds.left + 580, bounds.top + 144)
             deadline = time.time() + 25
             while time.time() < deadline:
                 if export_file.exists():
