@@ -688,7 +688,7 @@ jobs:
               Start-Sleep -Milliseconds 250
               [PL9MenuProbe]::Click(352,135)
               Start-Sleep -Milliseconds 500
-              [PL9MenuProbe]::SetCursorPos(382,205) | Out-Null
+              [PL9MenuProbe]::Click(402,205)
               Start-Sleep -Milliseconds 650
             }
             [PL9MenuProbe]::SetForegroundWindow($pl9Process.MainWindowHandle) | Out-Null
@@ -708,7 +708,7 @@ jobs:
             try {
               [PL9MenuProbe]::Click(352,135)
               Start-Sleep -Milliseconds 550
-              [PL9MenuProbe]::SetCursorPos(382,205) | Out-Null
+              [PL9MenuProbe]::Click(402,205)
               Start-Sleep -Seconds 1
               Write-Pl9ScreenSnapshot -Label 'REPORTS_INTERPRETATIONS_SUBMENU'
               [PL9MenuProbe]::Click(574,276)
@@ -752,7 +752,7 @@ jobs:
               [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
               Start-Sleep -Milliseconds 400
               Open-Pl9InterpretationsMenu
-              [PL9MenuProbe]::SetCursorPos(575,341) | Out-Null
+              [PL9MenuProbe]::Click(575,341)
               Start-Sleep -Milliseconds 850
               Write-Pl9ScreenSnapshot -Label 'LIFE_INTERPRETATIONS_SUBMENU'
               [PL9MenuProbe]::Click(758,341)
@@ -773,7 +773,7 @@ jobs:
                 @{ Name='CLASSICAL'; Y=317 }
               )) {
                 Open-Pl9InterpretationsMenu
-                [PL9MenuProbe]::SetCursorPos(575,[int]$family.Y) | Out-Null
+                [PL9MenuProbe]::Click(575,[int]$family.Y)
                 Start-Sleep -Milliseconds 750
                 Write-Pl9ScreenSnapshot -Label ("INTERPRETATIONS_" + $family.Name + "_MENU")
                 [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
