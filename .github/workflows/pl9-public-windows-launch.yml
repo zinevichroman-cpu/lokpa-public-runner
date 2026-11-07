@@ -749,13 +749,17 @@ jobs:
                 # Relative coordinates match the PL9 9.0 manual's 302x330 dialog.
                 # Request all five levels available in the actual report dialog;
                 # the manual's prose and its screenshot differ, so runtime output decides.
-                [PL9MenuProbe]::Click(($dx+115),($dy+50))
+                # Geometry must come from the live native dialog, not from a
+                # 302x330 manual screenshot (runner dialog was 507x446).
+                $dw=[int]$rectangle.Width
+                $dh=[int]$rectangle.Height
+                [PL9MenuProbe]::Click(($dx+[int]($dw*0.228)),($dy+[int]($dh*0.122)))
                 [System.Windows.Forms.SendKeys]::SendWait('^a')
                 [System.Windows.Forms.SendKeys]::SendWait('07:11:2026')
-                [PL9MenuProbe]::Click(($dx+26),($dy+236))
-                [PL9MenuProbe]::Click(($dx+161),($dy+267))
+                [PL9MenuProbe]::Click(($dx+[int]($dw*0.069)),($dy+[int]($dh*0.687)))
+                [PL9MenuProbe]::Click(($dx+[int]($dw*0.539)),($dy+[int]($dh*0.782)))
                 Write-Pl9ScreenSnapshot -Label 'DASHA_REPORT_PERIOD_SELECTED'
-                [PL9MenuProbe]::Click(($dx+171),($dy+318))
+                [PL9MenuProbe]::Click(($dx+[int]($dw*0.728)),($dy+[int]($dh*0.930)))
                 Start-Sleep -Seconds 4
                 Write-Pl9ScreenSnapshot -Label 'DASHA_REPORT_CONTENT'
                 Capture-Pl9ReportText -Label 'DASHA'
