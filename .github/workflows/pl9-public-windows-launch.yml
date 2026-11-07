@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/pl9-public-windows-launch.yml'
+      - 'pl9-api/pl9_api.py'
 
 permissions:
   contents: read
@@ -556,21 +557,8 @@ jobs:
               }
             }
             Write-Pl9ScreenSnapshot -Label 'AFTER_CALCULATION'
-            $chart_open_possible = $result.calculation_verified -or (
-              $result.operation.open.status -eq 'OPEN_REQUEST_SENT_UNCONFIRMED' -and
-              @($result.operation.open.remaining_windows).Count -eq 0
-            )
-            if ($chart_open_possible) {
-              $dashaBody = @{ menu_path = 'Reports->Dashas->Vimshottari' } | ConvertTo-Json -Compress
-              try {
-                $dashaResult = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:10810/ui/menu' -Headers @{ 'X-API-Key' = $env:PL9_API_KEY } -ContentType 'application/json' -Body $dashaBody -TimeoutSec 20
-                $dashaResult | ConvertTo-Json -Depth 8 | Write-Host
-                Start-Sleep -Seconds 2
-                Write-Pl9ScreenSnapshot -Label 'VIMSHOTTARI'
-              } catch {
-                Write-Host "PL9_DASHA_MENU_ERROR=$($_.Exception.Message)"
-              }
-            }
+            # Old Reports > Dashas > Vimshottari clicked the wrong print window.
+            Write-Host 'PL9_WRONG_VIMSHOTTARI_MENU_AUTOMATION_DISABLED=true'
             # Inspect and clear the actual PL9 modal before trying any report action.
             Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
             Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
@@ -647,6 +635,62 @@ jobs:
             }
           }
           '@ -ErrorAction Stop
+
+            # Copy is an explicit native PL9 report-window button
+            # (Manual/images/Feature57-2-LifeInterpretationReport.png).
+            function Capture-Pl9ReportText {
+              param([string]$Label)
+              $sentinel = 'PL9_CLIPBOARD_SENTINEL_' + [guid]::NewGuid().ToString('N')
+              try {
+                Set-Clipboard -Value $sentinel -ErrorAction Stop
+                $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+                $top = $desktop.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+                $foundCopy = $false
+                foreach ($window in $top) {
+                  if ($window.Current.ProcessId -ne $pl9Process.Id) { continue }
+                  $children = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+                  for ($n=0; $n -lt $children.Count; $n++) {
+                    $el = $children.Item($n)
+                    if ($el.Current.Name -eq 'Copy' -and $el.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button) {
+                      try {
+                        $pattern = $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                        $pattern.Invoke()
+                        $foundCopy = $true
+                        break
+                      } catch { Write-Host "PL9_REPORT_$($Label)_COPY_BUTTON_ERROR=$($_.Exception.Message)" }
+                    }
+                  }
+                  if ($foundCopy) { break }
+                }
+                Write-Host "PL9_REPORT_$($Label)_COPY_BUTTON_FOUND=$foundCopy"
+                if (-not $foundCopy) {
+                  [System.Windows.Forms.SendKeys]::SendWait('^c')
+                }
+                Start-Sleep -Milliseconds 650
+                $actual = Get-Clipboard -Raw -ErrorAction Stop
+                if ([string]::IsNullOrWhiteSpace($actual) -or $actual.Trim() -eq $sentinel) {
+                  Write-Host "PL9_REPORT_$($Label)_TEXT_NOT_EXTRACTED=true"
+                  return
+                }
+                $utf8=[System.Text.Encoding]::UTF8.GetBytes($actual)
+                $b64=[Convert]::ToBase64String($utf8)
+                Write-Host "PL9_REPORT_$($Label)_UTF8_BYTES=$($utf8.Length)"
+                for($off=0; $off -lt $b64.Length; $off+=3000) {
+                  $length=[Math]::Min(3000,$b64.Length-$off)
+                  Write-Host "PL9_REPORT_$($Label)_B64[$([int]($off/3000))]=$($b64.Substring($off,$length))"
+                }
+              } catch {
+                Write-Host "PL9_REPORT_$($Label)_CAPTURE_ERROR=$($_.Exception.Message)"
+              }
+            }
+            function Open-Pl9InterpretationsMenu {
+              [PL9MenuProbe]::SetForegroundWindow($pl9Process.MainWindowHandle) | Out-Null
+              Start-Sleep -Milliseconds 250
+              [PL9MenuProbe]::Click(352,135)
+              Start-Sleep -Milliseconds 500
+              [PL9MenuProbe]::SetCursorPos(382,205) | Out-Null
+              Start-Sleep -Milliseconds 650
+            }
             [PL9MenuProbe]::SetForegroundWindow($pl9Process.MainWindowHandle) | Out-Null
             Start-Sleep -Seconds 1
             foreach ($menu in @(
@@ -696,25 +740,47 @@ jobs:
                 [PL9MenuProbe]::Click(($dx+171),($dy+318))
                 Start-Sleep -Seconds 4
                 Write-Pl9ScreenSnapshot -Label 'DASHA_REPORT_CONTENT'
-                try {
-                  $clip = Get-Clipboard -Raw -ErrorAction SilentlyContinue
-                  [System.Windows.Forms.SendKeys]::SendWait('^a')
-                  [System.Windows.Forms.SendKeys]::SendWait('^c')
-                  Start-Sleep -Milliseconds 700
-                  $newClip = Get-Clipboard -Raw -ErrorAction SilentlyContinue
-                  if ($newClip -and $newClip -ne $clip) {
-                    Write-Host "PL9_DASHA_REPORT_CLIPBOARD_TEXT_BEGIN"
-                    Write-Host $newClip
-                    Write-Host "PL9_DASHA_REPORT_CLIPBOARD_TEXT_END"
-                  } else { Write-Host 'PL9_DASHA_REPORT_CLIPBOARD_NOT_CONFIRMED' }
-                } catch {
-                  Write-Host "PL9_DASHA_REPORT_COPY_ERROR=$($_.Exception.Message)"
-                }
+                Capture-Pl9ReportText -Label 'DASHA'
               } else {
                 Write-Host 'PL9_DASHA_REPORT_PERIOD_DIALOG_NOT_FOUND'
               }
             } catch {
               Write-Host "PL9_DASHA_REPORT_NAVIGATION_ERROR=$($_.Exception.Message)"
+            }
+            # Interpretations families documented by PL9 Manual (not just dashas).
+            try {
+              [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+              Start-Sleep -Milliseconds 400
+              Open-Pl9InterpretationsMenu
+              [PL9MenuProbe]::SetCursorPos(575,341) | Out-Null
+              Start-Sleep -Milliseconds 850
+              Write-Pl9ScreenSnapshot -Label 'LIFE_INTERPRETATIONS_SUBMENU'
+              [PL9MenuProbe]::Click(758,341)
+              Start-Sleep -Seconds 3
+              Write-Pl9ScreenSnapshot -Label 'LIFE_INTERPRETATIONS_REPORT'
+              Capture-Pl9ReportText -Label 'LIFE'
+            } catch {
+              Write-Host "PL9_LIFE_INTERPRETATIONS_ERROR=$($_.Exception.Message)"
+            }
+            try {
+              [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+              Start-Sleep -Milliseconds 500
+              foreach ($family in @(
+                @{ Name='GENERAL'; Y=205 },
+                @{ Name='PLANETARY'; Y=227 },
+                @{ Name='BHAVESH'; Y=249 },
+                @{ Name='TRANSIT'; Y=295 },
+                @{ Name='CLASSICAL'; Y=317 }
+              )) {
+                Open-Pl9InterpretationsMenu
+                [PL9MenuProbe]::SetCursorPos(575,[int]$family.Y) | Out-Null
+                Start-Sleep -Milliseconds 750
+                Write-Pl9ScreenSnapshot -Label ("INTERPRETATIONS_" + $family.Name + "_MENU")
+                [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+                Start-Sleep -Milliseconds 300
+              }
+            } catch {
+              Write-Host "PL9_INTERPRETATIONS_FAMILY_DISCOVERY_ERROR=$($_.Exception.Message)"
             }
             if ($result.calculation_verified -and $result.operation.export.matched_chart) {
               Write-Host 'PL9_API_REAL_CALCULATION_VERIFIED=true'
