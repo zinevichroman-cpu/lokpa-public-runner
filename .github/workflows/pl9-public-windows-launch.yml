@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   pl9:
@@ -677,4 +678,13 @@ public static class PL9MenuProbe {
             }
             if (Test-Path $stderr) { Get-Content $stderr | ForEach-Object { Write-Host $_ } }
           }
+      - name: Publish run locator and status for automated retrieval
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $status = if ('${{ job.status }}' -eq 'success') { 'success' } else { 'failure' }
+          $url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $payload = @{ state=$status; context='PL9 Windows 15:08'; description="PL9 Windows run: $status"; target_url=$url } | ConvertTo-Json -Compress
+          $payload | gh api -X POST "repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" --input -
 # PL9 run: corrected menu-bar offset for Research export and Reports Dashas.
