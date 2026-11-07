@@ -19,7 +19,8 @@ Every menu/button is NOT VERIFIED until: (1) input action recorded, (2) before/a
 | Reports > Interpretations | 7 families visible: General, Planetary, Bhavesh, Dasha, Transit, Classical, Life Interpretations | run 42331699060, REPORTS_INTERPRETATIONS_SUBMENU | open each third-level submenu & each report |
 | Reports > Interpretations > Dasha Interpretations > Dasha report period | VERIFIED: third-level popup and report-period dialog, including selectable 1–5 levels | run 42331948852, DASHA_THIRD_LEVEL_MENU and DASHA_REPORT_PERIOD_BEFORE | select 5th level, click OK with measured coordinates, capture actual report text |
 | Life Interpretations report | NOT VERIFIED | run 42331699060, LIFE report did not yield text | navigate & copy full native text |
-| Interpretations text export | NOT VERIFIED | run 42331699060, clipboard sentinel unchanged | use native Copy/Save/Print and confirm content |
+| Dasha Interpretations native Copy | VERIFIED: window showed report, Copy button clicked, clipboard returned 222,771 UTF-8 bytes of text | run 42332404403, PL9_REPORT_DASHA_UTF8_BYTES=222771 | test other report families, and confirm completeness of report pagination |
+| All other interpretation report text export | NOT VERIFIED | run 42332404403, LIFE report text not extracted | open each family, use native Copy/Save/Print and confirm content |
 
 ## Still untested — must not claim complete
 File, Edit, Charts, Classical references, Options, Tools, Windows, all toolbar icons, all submenus of Reports/Research/Print, dialog controls, reports' copy/save/print actions, up to five dasha levels, life-area reports, individual planetary/house/yoga/transit interpretations.
@@ -27,4 +28,4 @@ File, Edit, Charts, Classical references, Options, Tools, Windows, all toolbar i
 ## Source for navigation
 The user's PL9 archive: `GeoVision/PL9/Res1/Manual/` including `chapter08.htm`, `chapter21.htm`, and `images/Feature57-1-ReportsMenu.png`. Screenshots must be reconciled with the native Windows runner for each verified route.
 
-**Status of whole UI audit: NOT COMPLETE. Status of text extraction for requested chart: NOT COMPLETE.**
+**Status of whole UI audit: NOT COMPLETE. Status of native Dasha report text extraction: VERIFIED (222,771 UTF-8 bytes), archived privately. Full coverage of every report family, page and button: NOT COMPLETE.**
