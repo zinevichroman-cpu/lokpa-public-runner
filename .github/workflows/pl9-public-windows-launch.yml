@@ -730,12 +730,13 @@ jobs:
                   Write-Host "PL9_DASHA_DIALOG_NODE[$i] type=$($el.Current.ControlType.ProgrammaticName) name=$($el.Current.Name)"
                 }
                 # Relative coordinates match the PL9 9.0 manual's 302x330 dialog.
-                # Enter the five-year period and up to three nested Vimshottari levels.
+                # Request all five levels available in the actual report dialog;
+                # the manual's prose and its screenshot differ, so runtime output decides.
                 [PL9MenuProbe]::Click(($dx+115),($dy+50))
                 [System.Windows.Forms.SendKeys]::SendWait('^a')
                 [System.Windows.Forms.SendKeys]::SendWait('07:11:2026')
                 [PL9MenuProbe]::Click(($dx+26),($dy+236))
-                [PL9MenuProbe]::Click(($dx+161),($dy+188))
+                [PL9MenuProbe]::Click(($dx+161),($dy+267))
                 Write-Pl9ScreenSnapshot -Label 'DASHA_REPORT_PERIOD_SELECTED'
                 [PL9MenuProbe]::Click(($dx+171),($dy+318))
                 Start-Sleep -Seconds 4
