@@ -1,0 +1,169 @@
+name: PL9 native horoscope - configurable birth data
+on:
+  workflow_dispatch:
+    inputs:
+      birth_date:
+        description: YYYY-MM-DD
+        default: '1977-02-23'
+        required: true
+      birth_time:
+        description: HH:MM:SS local
+        default: '12:35:00'
+        required: true
+      chart_name:
+        description: Chart name
+        default: 'PL9 Gemini 1235'
+        required: true
+      gender:
+        description: male or female
+        default: 'male'
+        required: true
+      city:
+        description: Native PL9 city label
+        default: "Kamensk-ural'skiy"
+        required: true
+      state:
+        description: Region
+        default: "Sverdlovskaya Oblast'"
+        required: true
+      country:
+        description: Country
+        default: 'Russia'
+        required: true
+      utc_offset:
+        description: Birth timezone hours
+        default: '5'
+        required: true
+      longitude:
+        description: East longitude degrees
+        default: '61.9166667'
+        required: true
+      latitude:
+        description: North latitude degrees
+        default: '56.4'
+        required: true
+  push:
+    paths:
+      - '.github/workflows/pl9-dynamic-chart.yml'
+permissions:
+  contents: read
+jobs:
+  calculate:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      BIRTH_DATE: ${{ github.event.inputs.birth_date || '1977-02-23' }}
+      BIRTH_TIME: ${{ github.event.inputs.birth_time || '12:35:00' }}
+      BIRTH_NAME: ${{ github.event.inputs.chart_name || 'PL9 Gemini 1235' }}
+      BIRTH_GENDER: ${{ github.event.inputs.gender || 'male' }}
+      BIRTH_CITY: ${{ github.event.inputs.city || 'Kamensk-ural' }}
+      BIRTH_STATE: ${{ github.event.inputs.state || 'Sverdlovskaya Oblast' }}
+      BIRTH_COUNTRY: ${{ github.event.inputs.country || 'Russia' }}
+      BIRTH_OFFSET: ${{ github.event.inputs.utc_offset || '5' }}
+      BIRTH_LONGITUDE: ${{ github.event.inputs.longitude || '61.9166667' }}
+      BIRTH_LATITUDE: ${{ github.event.inputs.latitude || '56.4' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore private original PL9
+        env:
+          GH_TOKEN: ${{ secrets.LOKPA_PRIVATE_REPO_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (!$env:GH_TOKEN) { throw 'Private PL9 release unavailable' }
+          $parts = Join-Path $env:RUNNER_TEMP 'parts'
+          New-Item -ItemType Directory -Force $parts | Out-Null
+          gh release download pl9-package-v1 -R zinevichroman-cpu/lokpa-original-test -D $parts --pattern 'Parasharas_Light_9_RU.zip.*' --clobber
+          if($LASTEXITCODE -ne 0){ throw 'PL9 release download failure' }
+          $archive = Join-Path $env:RUNNER_TEMP 'original.zip'
+          $out = [IO.File]::Create($archive)
+          try {
+            1..5 | ForEach-Object {
+              $f = Join-Path $parts ('Parasharas_Light_9_RU.zip.{0:000}' -f $_)
+              $in = [IO.File]::OpenRead($f)
+              try { $in.CopyTo($out) } finally { $in.Dispose() }
+            }
+          } finally { $out.Dispose() }
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -ne '4483ae94c87dcc73e332b2bffd2874b56548a28c077dc16b3269745e5f1e7ce4'){ throw 'PL9 archive integrity mismatch' }
+          $dir = Join-Path $env:RUNNER_TEMP 'pl9'
+          Expand-Archive $archive -DestinationPath $dir -Force
+          $exe = Join-Path $dir 'GeoVision/PL9/PL9.exe'
+          if(!(Test-Path $exe)){ throw 'Original PL9.exe missing' }
+          if((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne '8868694b4711434b05eb02a341efc770ab2850c417276a282b7673881a5be367'){ throw 'PL9.exe hash mismatch' }
+          "PL9_EXE=$exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x86
+      - name: Install existing native PL9 API bridge
+        run: python -m pip install --disable-pip-version-check -r pl9-api/requirements.txt
+      - name: Calculate requested horoscope in PL9.exe
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PL9_API_PORT = '10810'
+          $env:PL9_API_KEY = [guid]::NewGuid().ToString('N')
+          $env:QT_ACCESSIBILITY = '1'
+          $env:QT_USE_NATIVE_WINDOWS = '1'
+          $gv = Split-Path -Parent (Split-Path -Parent $env:PL9_EXE)
+          $env:PL9_CHARTS_DIR = Join-Path $gv 'GeovisionCharts'
+          $env:PL9_EXPORT_DIR = Join-Path (Split-Path -Parent $env:PL9_EXE) 'Export'
+          $apiDir = Join-Path $env:GITHUB_WORKSPACE 'pl9-api'
+          $stdout = Join-Path $env:RUNNER_TEMP 'pl9.out'
+          $stderr = Join-Path $env:RUNNER_TEMP 'pl9.err'
+          $server = Start-Process python -ArgumentList @('pl9_api.py') -WorkingDirectory $apiDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $headers = @{'X-API-Key' = $env:PL9_API_KEY}
+            $health = $null
+            for($i=0;$i -lt 60;$i++){
+              if($server.HasExited){ throw 'PL9 API server exited unexpectedly' }
+              try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:10810/health' -Headers $headers -TimeoutSec 3
+                break
+              } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if(!$health -or !$health.executable_found){ throw 'Original PL9.exe unavailable' }
+            $birth = @{
+              name=$env:BIRTH_NAME; gender=$env:BIRTH_GENDER
+              date=$env:BIRTH_DATE; time=$env:BIRTH_TIME
+              utc_offset_hours=[double]::Parse($env:BIRTH_OFFSET,[cultureinfo]::InvariantCulture)
+              dst_hours=0
+              longitude_east_deg=[double]::Parse($env:BIRTH_LONGITUDE,[cultureinfo]::InvariantCulture)
+              latitude_north_deg=[double]::Parse($env:BIRTH_LATITUDE,[cultureinfo]::InvariantCulture)
+              city=$env:BIRTH_CITY; state=$env:BIRTH_STATE; country=$env:BIRTH_COUNTRY
+              bd_lookup_mode='S'
+            }
+            $payload = @{birth=$birth;open=$true;calculate=$true} | ConvertTo-Json -Depth 6
+            $result = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:10810/horoscope' -Headers $headers -ContentType 'application/json' -Body $payload -TimeoutSec 120
+            $result | ConvertTo-Json -Depth 18 | Set-Content 'pl9-calculation.json' -Encoding utf8
+            Write-Host "NATIVE_PL9_BIRTH=$($birth.date) $($birth.time) $($birth.city)"
+            Write-Host "NATIVE_PL9_CALC_VERIFIED=$($result.calculation_verified)"
+            Write-Host "NATIVE_PL9_EXPORT_MATCH=$($result.operation.export.matched_chart)"
+            $result | ConvertTo-Json -Depth 8 | Write-Host
+            if(!$result.calculation_verified -or !$result.operation.export.matched_chart){ throw 'Native PL9 result did not match requested chart' }
+            Add-Type -AssemblyName System.Drawing
+            Add-Type -AssemblyName System.Windows.Forms
+            [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+            Start-Sleep -Milliseconds 700
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = [System.Drawing.Bitmap]::new($bounds.Width,$bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+            try {
+              $graphics.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+              $bmp.Save('pl9-original-chart.png',[System.Drawing.Imaging.ImageFormat]::Png)
+            } finally { $graphics.Dispose();$bmp.Dispose() }
+          } finally {
+            if($server){ Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
+          }
+      - name: Preserve verified PL9 result and chart screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pl9-native-chart
+          path: |
+            pl9-calculation.json
+            pl9-original-chart.png
+          if-no-files-found: warn
+          retention-days: 7
