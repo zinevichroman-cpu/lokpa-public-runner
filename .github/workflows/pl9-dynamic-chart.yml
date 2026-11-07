@@ -10,6 +10,10 @@ on:
         description: HH:MM:SS local
         default: '12:35:00'
         required: true
+      report_from:
+        description: Dasha report start DD:MM:YYYY
+        default: '07:11:2026'
+        required: true
       chart_name:
         description: Chart name
         default: 'PL9 Gemini 1235'
@@ -57,6 +61,7 @@ jobs:
     env:
       BIRTH_DATE: ${{ github.event.inputs.birth_date || '1977-02-23' }}
       BIRTH_TIME: ${{ github.event.inputs.birth_time || '12:35:00' }}
+      REPORT_FROM: ${{ github.event.inputs.report_from || '07:11:2026' }}
       BIRTH_NAME: ${{ github.event.inputs.chart_name || 'PL9 Gemini 1235' }}
       BIRTH_GENDER: ${{ github.event.inputs.gender || 'male' }}
       BIRTH_CITY: ${{ github.event.inputs.city || 'Kamensk-ural' }}
@@ -154,6 +159,77 @@ jobs:
               $graphics.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
               $bmp.Save('pl9-original-chart.png',[System.Drawing.Imaging.ImageFormat]::Png)
             } finally { $graphics.Dispose();$bmp.Dispose() }
+            # Use the real PL9 Reports > Interpretations > Dasha Interpretations dialog.
+            # Any failure to extract interpretation text is reported separately.
+            try {
+              Add-Type -AssemblyName UIAutomationClient
+              Add-Type -AssemblyName UIAutomationTypes
+              $native = @'
+using System;
+using System.Runtime.InteropServices;
+public static class Pl9NativeClick {
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  public static void Click(int x,int y) {
+    SetCursorPos(x,y);
+    System.Threading.Thread.Sleep(100);
+    mouse_event(2,0,0,0,UIntPtr.Zero);
+    mouse_event(4,0,0,0,UIntPtr.Zero);
+  }
+}
+'@
+              Add-Type -TypeDefinition $native
+              $pl9 = Get-Process -Name PL9 -ErrorAction Stop | Select-Object -First 1
+              [Pl9NativeClick]::SetForegroundWindow($pl9.MainWindowHandle) | Out-Null
+              Start-Sleep -Milliseconds 650
+              [Pl9NativeClick]::Click(352,135)
+              Start-Sleep -Milliseconds 550
+              [Pl9NativeClick]::Click(402,205)
+              Start-Sleep -Milliseconds 650
+              [System.Windows.Forms.SendKeys]::SendWait('{DOWN 4}')
+              Start-Sleep -Milliseconds 450
+              [System.Windows.Forms.SendKeys]::SendWait('{RIGHT}')
+              Start-Sleep -Milliseconds 500
+              [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+              Start-Sleep -Seconds 2
+              $root = [System.Windows.Automation.AutomationElement]::RootElement
+              $cond = [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::NameProperty,'Dasha report period'
+              )
+              $dialog = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$cond)
+              if(!$dialog){ throw 'Native Dasha report period dialog was not found' }
+              $rect = $dialog.Current.BoundingRectangle
+              $dx=[int]$rect.X; $dy=[int]$rect.Y
+              $dw=[int]$rect.Width; $dh=[int]$rect.Height
+              Write-Host "NATIVE_PL9_DASHA_DIALOG=$dx,$dy,$dw,$dh"
+              [Pl9NativeClick]::Click(($dx+[int]($dw*0.228)),($dy+[int]($dh*0.122)))
+              [System.Windows.Forms.SendKeys]::SendWait('^a')
+              [System.Windows.Forms.SendKeys]::SendWait($env:REPORT_FROM)
+              [Pl9NativeClick]::Click(($dx+[int]($dw*0.069)),($dy+[int]($dh*0.687)))
+              [Pl9NativeClick]::Click(($dx+[int]($dw*0.539)),($dy+[int]($dh*0.782)))
+              [Pl9NativeClick]::Click(($dx+[int]($dw*0.728)),($dy+[int]($dh*0.930)))
+              Start-Sleep -Seconds 4
+              $rect2 = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+              $bmp2 = [System.Drawing.Bitmap]::new($rect2.Width,$rect2.Height)
+              $g2 = [System.Drawing.Graphics]::FromImage($bmp2)
+              try {
+                $g2.CopyFromScreen($rect2.Location,[System.Drawing.Point]::Empty,$rect2.Size)
+                $bmp2.Save('pl9-dasha-report.png',[System.Drawing.Imaging.ImageFormat]::Png)
+              } finally { $g2.Dispose(); $bmp2.Dispose() }
+              Set-Clipboard -Value '__PL9_CLIPBOARD_EMPTY__'
+              [Pl9NativeClick]::Click(857,678)
+              Start-Sleep -Milliseconds 900
+              $report = Get-Clipboard -Raw
+              if(!$report -or $report.Trim() -eq '__PL9_CLIPBOARD_EMPTY__'){
+                Write-Host 'NATIVE_PL9_DASHA_REPORT_TEXT_NOT_EXTRACTED'
+              }else{
+                $report | Set-Content 'pl9-dasha-interpretations.txt' -Encoding utf8
+                Write-Host "NATIVE_PL9_DASHA_REPORT_UTF8_BYTES=$([Text.Encoding]::UTF8.GetByteCount($report))"
+              }
+            } catch {
+              Write-Host "NATIVE_PL9_DASHA_REPORT_EXTRACTION_ERROR=$($_.Exception.Message)"
+            }
           } finally {
             if($server){ Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
           }
@@ -165,5 +241,7 @@ jobs:
           path: |
             pl9-calculation.json
             pl9-original-chart.png
+            pl9-dasha-report.png
+            pl9-dasha-interpretations.txt
           if-no-files-found: warn
           retention-days: 7
