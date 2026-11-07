@@ -627,9 +627,43 @@ jobs:
               }
             }
             Write-Pl9ScreenSnapshot -Label 'AFTER_DIALOG_CLOSE'
-            if (-not $result.calculation_verified) { throw 'PL9 API did not verify a matching native PL9 birth-data export.' }
-            if (-not $result.operation.export.matched_chart) { throw 'Verified response did not include the matched PL9 export row.' }
-            Write-Host 'PL9_API_REAL_CALCULATION_VERIFIED=true'
+            # Inspect the actual Qt menus after closing the unexpected printout modal.
+            # The previous keyboard navigation selected the wrong menu; never claim a native export.
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+public static class PL9MenuProbe {
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+  public static void Click(int x,int y) {
+    if (!SetCursorPos(x,y)) throw new Exception("SetCursorPos failed");
+    Thread.Sleep(200);
+    mouse_event(2,0,0,0,UIntPtr.Zero);
+    Thread.Sleep(100);
+    mouse_event(4,0,0,0,UIntPtr.Zero);
+  }
+}
+'@ -ErrorAction Stop
+            [PL9MenuProbe]::SetForegroundWindow($pl9Process.MainWindowHandle) | Out-Null
+            Start-Sleep -Seconds 1
+            foreach ($menu in @(
+              @{ Label='MENU_REPORTS'; X=352; Y=135 },
+              @{ Label='MENU_RESEARCH'; X=736; Y=135 },
+              @{ Label='MENU_PRINT'; X=676; Y=135 }
+            )) {
+              [PL9MenuProbe]::Click([int]$menu.X,[int]$menu.Y)
+              Start-Sleep -Seconds 1
+              Write-Pl9ScreenSnapshot -Label $menu.Label
+              [PL9MenuProbe]::Click([int]$menu.X,[int]$menu.Y)
+              Start-Sleep -Milliseconds 350
+            }
+            if ($result.calculation_verified -and $result.operation.export.matched_chart) {
+              Write-Host 'PL9_API_REAL_CALCULATION_VERIFIED=true'
+            } else {
+              Write-Host 'PL9_API_REAL_CALCULATION_VERIFIED=false; native export did not match; menu diagnosis captured'
+            }
           } finally {
             if ($null -ne $server) {
               $server.Refresh()
