@@ -660,6 +660,62 @@ public static class PL9MenuProbe {
               [PL9MenuProbe]::Click([int]$menu.X,[int]$menu.Y)
               Start-Sleep -Milliseconds 350
             }
+            # Per bundled PL9 manual: Reports > Interpretations > Dasha Interpretations.
+            try {
+              [PL9MenuProbe]::Click(352,135)
+              Start-Sleep -Milliseconds 550
+              [PL9MenuProbe]::SetCursorPos(382,205) | Out-Null
+              Start-Sleep -Seconds 1
+              Write-Pl9ScreenSnapshot -Label 'REPORTS_INTERPRETATIONS_SUBMENU'
+              [PL9MenuProbe]::Click(574,276)
+              Start-Sleep -Seconds 2
+              Write-Pl9ScreenSnapshot -Label 'DASHA_REPORT_PERIOD_BEFORE'
+              $desktopRoot = [System.Windows.Automation.AutomationElement]::RootElement
+              $periodCondition = [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::NameProperty, 'Dasha report period'
+              )
+              $periodDialog = $desktopRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$periodCondition)
+              if ($null -ne $periodDialog) {
+                $rectangle = $periodDialog.Current.BoundingRectangle
+                $dx = [int]$rectangle.X
+                $dy = [int]$rectangle.Y
+                Write-Host "PL9_DASHA_PERIOD_DIALOG rect=$dx,$dy,$($rectangle.Width),$($rectangle.Height)"
+                $controls = $periodDialog.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+                for ($i=0; $i -lt [Math]::Min($controls.Count,80); $i++) {
+                  $el=$controls.Item($i)
+                  Write-Host "PL9_DASHA_DIALOG_NODE[$i] type=$($el.Current.ControlType.ProgrammaticName) name=$($el.Current.Name)"
+                }
+                # Relative coordinates match the PL9 9.0 manual's 302x330 dialog.
+                # Enter the five-year period and up to three nested Vimshottari levels.
+                [PL9MenuProbe]::Click(($dx+115),($dy+50))
+                [System.Windows.Forms.SendKeys]::SendWait('^a')
+                [System.Windows.Forms.SendKeys]::SendWait('07:11:2026')
+                [PL9MenuProbe]::Click(($dx+26),($dy+236))
+                [PL9MenuProbe]::Click(($dx+161),($dy+188))
+                Write-Pl9ScreenSnapshot -Label 'DASHA_REPORT_PERIOD_SELECTED'
+                [PL9MenuProbe]::Click(($dx+171),($dy+318))
+                Start-Sleep -Seconds 4
+                Write-Pl9ScreenSnapshot -Label 'DASHA_REPORT_CONTENT'
+                try {
+                  $clip = Get-Clipboard -Raw -ErrorAction SilentlyContinue
+                  [System.Windows.Forms.SendKeys]::SendWait('^a')
+                  [System.Windows.Forms.SendKeys]::SendWait('^c')
+                  Start-Sleep -Milliseconds 700
+                  $newClip = Get-Clipboard -Raw -ErrorAction SilentlyContinue
+                  if ($newClip -and $newClip -ne $clip) {
+                    Write-Host "PL9_DASHA_REPORT_CLIPBOARD_TEXT_BEGIN"
+                    Write-Host $newClip
+                    Write-Host "PL9_DASHA_REPORT_CLIPBOARD_TEXT_END"
+                  } else { Write-Host 'PL9_DASHA_REPORT_CLIPBOARD_NOT_CONFIRMED' }
+                } catch {
+                  Write-Host "PL9_DASHA_REPORT_COPY_ERROR=$($_.Exception.Message)"
+                }
+              } else {
+                Write-Host 'PL9_DASHA_REPORT_PERIOD_DIALOG_NOT_FOUND'
+              }
+            } catch {
+              Write-Host "PL9_DASHA_REPORT_NAVIGATION_ERROR=$($_.Exception.Message)"
+            }
             if ($result.calculation_verified -and $result.operation.export.matched_chart) {
               Write-Host 'PL9_API_REAL_CALCULATION_VERIFIED=true'
             } else {
