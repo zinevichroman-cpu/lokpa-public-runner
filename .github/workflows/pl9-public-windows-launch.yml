@@ -557,6 +557,16 @@ jobs:
               }
             }
             Write-Pl9ScreenSnapshot -Label 'AFTER_CALCULATION'
+            # A successful Research > Export Birth Chart opens the native Qt
+            # informational modal "The birth data is written to EXPORT/birthdat.txt".
+            # It must be dismissed before touching any Reports menu.
+            if ($result.calculation_verified -eq $true) {
+              Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+              [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+              Start-Sleep -Milliseconds 750
+              Write-Pl9ScreenSnapshot -Label 'AFTER_EXPORT_CONFIRMATION_CLOSE'
+              Write-Host 'PL9_EXPORT_MODAL_DISMISS_KEY_SENT=true'
+            }
             # Old Reports > Dashas > Vimshottari clicked the wrong print window.
             Write-Host 'PL9_WRONG_VIMSHOTTARI_MENU_AUTOMATION_DISABLED=true'
             # Inspect and clear the actual PL9 modal before trying any report action.
