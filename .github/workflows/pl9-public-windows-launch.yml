@@ -673,7 +673,14 @@ jobs:
                   if ($foundCopy) { break }
                 }
                 Write-Host "PL9_REPORT_$($Label)_COPY_BUTTON_FOUND=$foundCopy"
-                if (-not $foundCopy) {
+                if (-not $foundCopy -and $Label -eq 'DASHA') {
+                  # Native 1024x768 screenshot of run 42332157783 shows the
+                  # Dasha Interpretations report's actual Copy button centered
+                  # at (857,678). Qt exposes only Pane nodes through UIA.
+                  [PL9MenuProbe]::Click(857,678)
+                  $foundCopy = $true
+                  Write-Host "PL9_REPORT_DASHA_NATIVE_COPY_BUTTON_CLICKED=true"
+                } elseif (-not $foundCopy) {
                   [System.Windows.Forms.SendKeys]::SendWait('^c')
                 }
                 Start-Sleep -Milliseconds 650
