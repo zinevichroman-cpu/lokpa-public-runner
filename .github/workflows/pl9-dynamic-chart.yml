@@ -8,11 +8,11 @@ on:
         required: true
       birth_time:
         description: HH:MM:SS local
-        default: '12:35:00'
+        default: '15:08:00'
         required: true
       chart_name:
         description: Chart name
-        default: 'PL9 Gemini 1235'
+        default: 'PL9 Cancer 1508 Original comparison'
         required: true
       gender:
         description: male or female
@@ -56,8 +56,8 @@ jobs:
         shell: pwsh
     env:
       BIRTH_DATE: ${{ github.event.inputs.birth_date || '1977-02-23' }}
-      BIRTH_TIME: ${{ github.event.inputs.birth_time || '12:35:00' }}
-      BIRTH_NAME: ${{ github.event.inputs.chart_name || 'PL9 Gemini 1235' }}
+      BIRTH_TIME: ${{ github.event.inputs.birth_time || '15:08:00' }}
+      BIRTH_NAME: ${{ github.event.inputs.chart_name || 'PL9 Cancer 1508 Original comparison' }}
       BIRTH_GENDER: ${{ github.event.inputs.gender || 'male' }}
       BIRTH_CITY: ${{ github.event.inputs.city || 'Kamensk-ural' }}
       BIRTH_STATE: ${{ github.event.inputs.state || 'Sverdlovskaya Oblast' }}
