@@ -1,6 +1,9 @@
 name: LOKPA Original — private issue runner
 
 on:
+  push:
+    paths:
+      - '.github/workflows/lokpa-public-runner.yml'
   workflow_dispatch:
     inputs:
       issue_number:
@@ -42,8 +45,8 @@ jobs:
       - name: Execute selected private issue
         env:
           LOKPA_PRIVATE_REPO: zinevichroman-cpu/lokpa-original-test
-          LOKPA_ISSUE_NUMBER: ${{ inputs.issue_number }}
-          LOKPA_FORCE_RERUN: ${{ inputs.force_rerun }}
+          LOKPA_ISSUE_NUMBER: ${{ github.event_name == 'push' && '118' || inputs.issue_number }}
+          LOKPA_FORCE_RERUN: ${{ inputs.force_rerun || 'false' }}
           LOKPA_PRIVATE_REPO_TOKEN: ${{ secrets.LOKPA_PRIVATE_REPO_TOKEN }}
           PRIVATE_SOURCE_PATH: private-source
         run: python dispatch_runner.py
